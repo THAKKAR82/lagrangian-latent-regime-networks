@@ -117,7 +117,14 @@ def main(cfg: DictConfig) -> None:
     all_metrics: list[dict] = []
     all_fold_ids: list[int] = []
     all_importances: list[np.ndarray] = []
-    feature_names = list(features.columns)
+    base_feature_names = list(features.columns)
+    # When flat=True, each window creates window_len * n_features columns
+    window_len = cfg.data.window_len
+    feature_names = [
+        f"{col}_t-{window_len - 1 - lag}"
+        for lag in range(window_len)
+        for col in base_feature_names
+    ]
 
     for fold in build_folds(
         features,

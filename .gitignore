@@ -10,3 +10,5 @@ dist/
 *.parquet
 reports/figures/*.png
 reports/figures/*.html
+fold_*/
+walk_forward_summary.csv
