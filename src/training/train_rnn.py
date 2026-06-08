@@ -69,9 +69,9 @@ def _train_fold(
         drop_last=False,
     )
 
+    model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.model.lr)
     criterion = nn.CrossEntropyLoss()
-    model.to(device)
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -118,7 +118,7 @@ def main(cfg: DictConfig) -> None:
             f"Unknown model name '{model_name}'. Choose from: {list(_MODEL_REGISTRY)}"
         )
     ModelClass = _MODEL_REGISTRY[model_name]
-    device = torch.device(cfg.model.get("device", "cpu"))
+    device = torch.device(cfg.model.device)
 
     # --- Data ---
     dm = DataManager(
