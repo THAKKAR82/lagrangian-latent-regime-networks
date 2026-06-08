@@ -124,3 +124,12 @@ def test_rnn_predict_in_range(rnn_cfg, toy_seq_data, ModelClass):
     model = ModelClass(rnn_cfg)
     preds = model.predict(X_val)
     assert set(preds.tolist()).issubset({0, 1, 2, 3})
+
+
+@pytest.mark.parametrize("ModelClass", [RegimeLSTM, RegimeGRU])
+def test_rnn_predict_proba_switches_to_eval(rnn_cfg, toy_seq_data, ModelClass):
+    X_train, y_train, X_val, y_val = toy_seq_data
+    model = ModelClass(rnn_cfg)
+    model.train()  # explicitly put in train mode
+    _ = model.predict_proba(X_val)
+    assert not model.training, "predict_proba should switch model to eval mode"

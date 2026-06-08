@@ -28,6 +28,7 @@ class _RegimeRNN(nn.Module):
     def __init__(self, cfg: RNNConfig, rnn_cell: type) -> None:
         super().__init__()
         self.cfg = cfg
+        torch.manual_seed(cfg.seed)
         dropout = cfg.dropout if cfg.num_layers > 1 else 0.0
         self.rnn = rnn_cell(
             input_size=cfg.input_dim,
@@ -43,6 +44,12 @@ class _RegimeRNN(nn.Module):
         out, _ = self.rnn(x)
         last = out[:, -1, :]
         return self.head(self.norm(last))
+
+    def fit(self, *args, **kwargs):
+        raise NotImplementedError(
+            "Training is handled by src.training.train_rnn — "
+            "instantiate the model there, not via fit()."
+        )
 
     @torch.no_grad()
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
