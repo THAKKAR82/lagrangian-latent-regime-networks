@@ -278,8 +278,21 @@ def test_lagrangian_damping_positive(lag_cfg):
     assert gamma.item() > 0, "Damping must be positive"
 
 
-def test_lagrangian_forward_finite(lag_cfg):
-    model = LagrangianRegimeNet(lag_cfg)
+@pytest.mark.parametrize("n_steps,scale", [(1, 1.0), (4, 1.0), (8, 1.0), (4, 10.0)])
+def test_lagrangian_forward_finite(n_steps, scale):
+    cfg = LagrangianConfig(input_dim=37, window_len=40, latent_dim=8, hidden_dim=32, n_steps=n_steps)
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 40, 37) * scale
+    logits = model(x)
+    assert torch.isfinite(logits).all(), f"Non-finite logits with n_steps={n_steps}, scale={scale}"
+
+
+def test_lagrangian_backward_grad_flow():
+    cfg = LagrangianConfig(input_dim=37, window_len=40, latent_dim=8, hidden_dim=32, n_steps=3)
+    model = LagrangianRegimeNet(cfg)
     x = torch.randn(4, 40, 37)
     logits = model(x)
-    assert torch.isfinite(logits).all(), "Forward pass produced non-finite logits"
+    loss = logits.sum()
+    loss.backward()
+    assert model.potential_net.net[0].weight.grad is not None, "No grad on potential_net"
+    assert model.raw_gamma.grad is not None, "No grad on raw_gamma"

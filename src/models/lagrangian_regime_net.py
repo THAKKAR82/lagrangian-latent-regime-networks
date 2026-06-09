@@ -31,8 +31,10 @@ class LagrangianConfig:
 
 
 def _softplus_inverse(y: float) -> float:
-    """Inverse of softplus: x such that softplus(x) = y."""
-    return math.log(math.exp(y) - 1.0)
+    """Inverse of softplus: x such that softplus(x) = y. Requires y > 0."""
+    if y <= 0:
+        raise ValueError(f"softplus_inverse requires y > 0, got {y}")
+    return math.log(math.expm1(y))
 
 
 class MassNet(nn.Module):
