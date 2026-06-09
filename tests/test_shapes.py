@@ -189,3 +189,97 @@ def test_node_config_fields():
     assert hasattr(cfg, "ode_hidden_dim")
     assert hasattr(cfg, "solver")
     assert cfg.solver == "dopri5"
+
+
+from src.models.lagrangian_regime_net import LagrangianRegimeNet, LagrangianConfig
+
+
+@pytest.fixture
+def lag_cfg():
+    return LagrangianConfig(
+        input_dim=37,
+        window_len=40,
+        latent_dim=8,
+        hidden_dim=32,
+        n_steps=3,
+        seed=42,
+    )
+
+
+@pytest.mark.parametrize("batch_size", [1, 8])
+def test_lagrangian_forward_output_shape(lag_cfg, batch_size):
+    model = LagrangianRegimeNet(lag_cfg)
+    x = torch.randn(batch_size, 40, 37)
+    out = model(x)
+    assert out.shape == (batch_size, 4), f"Expected ({batch_size}, 4), got {out.shape}"
+
+
+def test_lagrangian_predict_shape(lag_cfg, toy_seq_data):
+    X_train, y_train, X_val, y_val = toy_seq_data
+    model = LagrangianRegimeNet(lag_cfg)
+    preds = model.predict(X_val)
+    assert preds.shape == (len(X_val),)
+
+
+def test_lagrangian_predict_proba_shape(lag_cfg, toy_seq_data):
+    X_train, y_train, X_val, y_val = toy_seq_data
+    model = LagrangianRegimeNet(lag_cfg)
+    proba = model.predict_proba(X_val)
+    assert proba.shape == (len(X_val), 4)
+
+
+def test_lagrangian_proba_sums_to_one(lag_cfg, toy_seq_data):
+    X_train, y_train, X_val, y_val = toy_seq_data
+    model = LagrangianRegimeNet(lag_cfg)
+    proba = model.predict_proba(X_val)
+    np.testing.assert_allclose(proba.sum(axis=1), 1.0, atol=1e-5)
+
+
+def test_lagrangian_predict_in_range(lag_cfg, toy_seq_data):
+    X_train, y_train, X_val, y_val = toy_seq_data
+    model = LagrangianRegimeNet(lag_cfg)
+    preds = model.predict(X_val)
+    assert set(preds.tolist()).issubset({0, 1, 2, 3})
+
+
+def test_lagrangian_predict_proba_switches_to_eval(lag_cfg, toy_seq_data):
+    X_train, y_train, X_val, y_val = toy_seq_data
+    model = LagrangianRegimeNet(lag_cfg)
+    model.train()
+    _ = model.predict_proba(X_val)
+    assert not model.training, "predict_proba should switch model to eval mode"
+
+
+def test_lagrangian_trajectory_length(lag_cfg):
+    model = LagrangianRegimeNet(lag_cfg)
+    x = torch.randn(4, 40, 37)
+    _ = model(x)
+    assert len(model.last_trajectory) == lag_cfg.n_steps
+
+
+def test_lagrangian_trajectory_shape(lag_cfg):
+    model = LagrangianRegimeNet(lag_cfg)
+    x = torch.randn(4, 40, 37)
+    _ = model(x)
+    for z in model.last_trajectory:
+        assert z.shape == (4, lag_cfg.latent_dim)
+
+
+def test_lagrangian_mass_positive(lag_cfg):
+    model = LagrangianRegimeNet(lag_cfg)
+    z = torch.randn(4, lag_cfg.latent_dim)
+    m = model.mass_net(z)
+    assert (m > 0).all(), "Mass diagonal must be strictly positive"
+
+
+def test_lagrangian_damping_positive(lag_cfg):
+    model = LagrangianRegimeNet(lag_cfg)
+    gamma = torch.nn.functional.softplus(model.raw_gamma)
+    assert gamma.item() > 0, "Damping must be positive"
+
+
+def test_lagrangian_forward_finite(lag_cfg):
+    model = LagrangianRegimeNet(lag_cfg)
+    x = torch.randn(4, 40, 37)
+    logits = model(x)
+    assert torch.isfinite(logits).all(), "Forward pass produced non-finite logits"
