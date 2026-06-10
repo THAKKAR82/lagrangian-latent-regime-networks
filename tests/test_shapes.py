@@ -196,7 +196,10 @@ def test_node_config_fields():
     assert cfg.solver == "dopri5"
 
 
-from src.models.lagrangian_regime_net import LagrangianRegimeNet, LagrangianConfig, PotentialNet
+from src.models.lagrangian_regime_net import (
+    LagrangianRegimeNet, LagrangianConfig, PotentialNet,
+    CausalConv1d, Conv1dEncoder, TCNEncoder, HybridConvEncoder,
+)
 
 
 @pytest.fixture
@@ -513,3 +516,211 @@ def test_multi_horizon_no_nan_in_head(toy_spy_prices):
     assert labels_df["label_5"].iloc[-5:].isna().all(), "Last 5 rows of label_5 should be NaN"
     # label_20: last 20 rows NaN
     assert labels_df["label_20"].iloc[-20:].isna().all(), "Last 20 rows of label_20 should be NaN"
+
+
+# ---------------------------------------------------------------------------
+# Encoder ablation tests
+# ---------------------------------------------------------------------------
+
+ENCODER_TYPES = ["mlp", "conv1d", "tcn", "hybrid_conv"]
+
+
+def _make_lag_cfg(encoder_type: str) -> LagrangianConfig:
+    return LagrangianConfig(
+        input_dim=37,
+        window_len=40,
+        latent_dim=8,
+        hidden_dim=32,
+        encoder_dim=32,
+        encoder_type=encoder_type,
+        conv_channels=32,
+        conv_kernel_size=3,
+        tcn_channels=32,
+        tcn_kernel_size=3,
+        tcn_dilations=[1, 2, 4],
+        n_steps=3,
+        use_vector_damping=True,
+        use_coord_transform=True,
+        seed=0,
+    )
+
+
+@pytest.mark.parametrize("encoder_type", ENCODER_TYPES)
+def test_lagrangian_encoder_forward_shape(encoder_type):
+    cfg = _make_lag_cfg(encoder_type)
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(8, 40, 37)
+    out = model(x)
+    assert out.shape == (8, 4), f"{encoder_type}: expected (8, 4), got {out.shape}"
+
+
+@pytest.mark.parametrize("encoder_type", ENCODER_TYPES)
+def test_lagrangian_encoder_forward_finite(encoder_type):
+    cfg = _make_lag_cfg(encoder_type)
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(8, 40, 37)
+    out = model(x)
+    assert torch.isfinite(out).all(), f"{encoder_type}: non-finite logits"
+
+
+@pytest.mark.parametrize("encoder_type", ENCODER_TYPES)
+def test_lagrangian_encoder_predict_proba_shape(encoder_type):
+    cfg = _make_lag_cfg(encoder_type)
+    model = LagrangianRegimeNet(cfg)
+    X = np.random.randn(16, 40, 37).astype(np.float32)
+    proba = model.predict_proba(X)
+    assert proba.shape == (16, 4), f"{encoder_type}: predict_proba shape wrong"
+    np.testing.assert_allclose(proba.sum(axis=1), 1.0, atol=1e-5)
+
+
+@pytest.mark.parametrize("encoder_type", ENCODER_TYPES)
+def test_lagrangian_encoder_trajectory_length(encoder_type):
+    cfg = _make_lag_cfg(encoder_type)
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 40, 37)
+    _ = model(x)
+    assert len(model.last_trajectory) == cfg.n_steps, f"{encoder_type}: trajectory length wrong"
+
+
+@pytest.mark.parametrize("encoder_type", ENCODER_TYPES)
+def test_lagrangian_encoder_no_nan_in_output(encoder_type):
+    cfg = _make_lag_cfg(encoder_type)
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 40, 37)
+    h = model.encoder(x)
+    assert not torch.isnan(h).any(), f"{encoder_type}: NaN in encoder output"
+
+
+@pytest.mark.parametrize("encoder_type", ENCODER_TYPES)
+def test_lagrangian_encoder_backward_grad_flow(encoder_type):
+    cfg = _make_lag_cfg(encoder_type)
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 40, 37)
+    logits = model(x)
+    logits.sum().backward()
+    # Check that at least one encoder parameter received a gradient
+    enc_grads = [p.grad for p in model.encoder.parameters() if p.grad is not None]
+    assert len(enc_grads) > 0, f"{encoder_type}: no gradient flowed to encoder"
+
+
+def test_causal_conv1d_preserves_length():
+    """CausalConv1d must output the same T as input (causal padding correctness)."""
+    for kernel_size in [3, 5]:
+        for dilation in [1, 2, 4]:
+            conv = CausalConv1d(16, 16, kernel_size, dilation)
+            x = torch.randn(4, 16, 40)
+            y = conv(x)
+            assert y.shape == (4, 16, 40), (
+                f"kernel={kernel_size} dilation={dilation}: "
+                f"expected T=40, got {y.shape[2]}"
+            )
+
+
+def test_lagrangian_encoder_param_counts():
+    """Log parameter counts for each encoder — acts as a sanity check."""
+    for enc in ENCODER_TYPES:
+        cfg = _make_lag_cfg(enc)
+        model = LagrangianRegimeNet(cfg)
+        enc_params = sum(p.numel() for p in model.encoder.parameters())
+        total_params = sum(p.numel() for p in model.parameters())
+        # Sanity: encoder params must be > 0 and < total
+        assert enc_params > 0, f"{enc}: encoder has no parameters"
+        assert enc_params < total_params, f"{enc}: encoder has all params (dynamics missing?)"
+
+
+def test_lagrangian_mlp_encoder_backward_compat():
+    """Default LagrangianConfig (no encoder_type set) must still work as MLP."""
+    cfg = LagrangianConfig(input_dim=37, window_len=40, latent_dim=8, hidden_dim=32, n_steps=2)
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 40, 37)
+    out = model(x)
+    assert out.shape == (4, 4)
+    assert torch.isfinite(out).all()
+
+
+# ---------------------------------------------------------------------------
+# Skip-connection tests
+# ---------------------------------------------------------------------------
+
+def test_skip_connection_output_shape():
+    """Model with use_skip_connection=True must still output (batch, 4)."""
+    cfg = LagrangianConfig(
+        input_dim=37, window_len=40, latent_dim=8, hidden_dim=32,
+        n_steps=3, encoder_type="conv1d", use_skip_connection=True,
+    )
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 40, 37)
+    out = model(x)
+    assert out.shape == (4, 4), f"Expected (4, 4), got {out.shape}"
+
+
+def test_skip_connection_forward_finite():
+    """Skip connection must not introduce NaNs or Infs."""
+    cfg = LagrangianConfig(
+        input_dim=37, window_len=40, latent_dim=8, hidden_dim=32,
+        n_steps=3, encoder_type="conv1d", use_skip_connection=True,
+    )
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 40, 37)
+    out = model(x)
+    assert torch.isfinite(out).all(), "Non-finite logits with skip connection"
+
+
+def test_skip_connection_grad_flows():
+    """Gradient must flow through the skip projection weights."""
+    cfg = LagrangianConfig(
+        input_dim=37, window_len=40, latent_dim=8, hidden_dim=32,
+        n_steps=3, encoder_type="conv1d", use_skip_connection=True,
+    )
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 40, 37)
+    model(x).sum().backward()
+    assert model.skip_proj.weight.grad is not None, "No gradient on skip_proj.weight"
+    assert model.skip_proj.weight.grad.abs().sum() > 0, "Zero gradient on skip_proj.weight"
+
+
+def test_skip_connection_default_off():
+    """use_skip_connection defaults to False and model has no skip_proj attribute."""
+    cfg = LagrangianConfig(input_dim=37, window_len=40, latent_dim=8, hidden_dim=32, n_steps=2)
+    model = LagrangianRegimeNet(cfg)
+    assert not hasattr(model, "skip_proj"), "skip_proj should not exist when use_skip_connection=False"
+
+
+def test_skip_connection_changes_output():
+    """Skip connection should change logit values vs same model without it."""
+    torch.manual_seed(0)
+    cfg_base = LagrangianConfig(
+        input_dim=37, window_len=40, latent_dim=8, hidden_dim=32,
+        n_steps=3, encoder_type="conv1d", seed=0, use_skip_connection=False,
+    )
+    cfg_skip = LagrangianConfig(
+        input_dim=37, window_len=40, latent_dim=8, hidden_dim=32,
+        n_steps=3, encoder_type="conv1d", seed=0, use_skip_connection=True,
+    )
+    x = torch.randn(4, 40, 37)
+    out_base = LagrangianRegimeNet(cfg_base)(x)
+    out_skip = LagrangianRegimeNet(cfg_skip)(x)
+    assert not torch.allclose(out_base, out_skip), "Skip connection produced identical output to baseline"
+
+
+def test_eval_result_has_class_f1():
+    from src.evaluation.metrics import evaluate
+    rng = np.random.default_rng(0)
+    y_true = rng.integers(0, 4, 100)
+    y_prob = np.abs(rng.standard_normal((100, 4))).astype(np.float32)
+    y_prob /= y_prob.sum(axis=1, keepdims=True)
+    y_pred = y_prob.argmax(axis=1)
+    result = evaluate(y_true, y_pred, y_prob)
+    assert hasattr(result, "class_f1"), "EvalResult must have class_f1 attribute"
+    assert result.class_f1.shape == (4,), f"Expected (4,), got {result.class_f1.shape}"
+
+
+def test_eval_result_class_f1_in_range():
+    from src.evaluation.metrics import evaluate
+    rng = np.random.default_rng(1)
+    y_true = rng.integers(0, 4, 200)
+    y_prob = np.abs(rng.standard_normal((200, 4))).astype(np.float32)
+    y_prob /= y_prob.sum(axis=1, keepdims=True)
+    y_pred = y_prob.argmax(axis=1)
+    result = evaluate(y_true, y_pred, y_prob)
+    assert np.all(result.class_f1 >= 0.0) and np.all(result.class_f1 <= 1.0)

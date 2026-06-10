@@ -1,7 +1,7 @@
 """Evaluation metrics for regime forecasting."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from sklearn.metrics import (
@@ -20,6 +20,7 @@ class EvalResult:
     ece: float
     switch_frequency: float
     mean_entropy: float
+    class_f1: np.ndarray = field(default_factory=lambda: np.zeros(4))
 
 
 def _brier_score(y_true: np.ndarray, y_prob: np.ndarray) -> float:
@@ -63,6 +64,7 @@ def evaluate(
     y_prob: np.ndarray,
 ) -> EvalResult:
     """Compute all regime forecasting metrics."""
+    class_f1 = f1_score(y_true, y_pred, average=None, zero_division=0, labels=[0, 1, 2, 3])
     return EvalResult(
         macro_f1=float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
         balanced_accuracy=float(balanced_accuracy_score(y_true, y_pred)),
@@ -71,6 +73,7 @@ def evaluate(
         ece=_ece(y_true, y_prob),
         switch_frequency=_switch_frequency(y_pred),
         mean_entropy=_mean_entropy(y_prob),
+        class_f1=np.asarray(class_f1, dtype=np.float32),
     )
 
 
