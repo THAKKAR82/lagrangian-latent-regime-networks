@@ -23,6 +23,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from src.data.download import fetch_all
 from src.data.manager import DataManager
 from src.evaluation.metrics import evaluate
+from src.evaluation.predictions import PredictionArtifact
+from src.features.econophysics import build_econophysics_features
 from src.features.engineer import FeaturesConfig, build_features
 from src.labels.quantile_labeler import LabelConfig, QuantileLabeler
 from src.models.lagrangian_regime_net import LagrangianConfig, LagrangianRegimeNet
@@ -131,6 +133,14 @@ def main(cfg: DictConfig) -> None:
         primary_asset=cfg.features.primary_asset,
     )
     features = build_features(prices, feat_cfg)
+    if getattr(cfg.model, 'use_econophysics_features', False):
+        eco_features = build_econophysics_features(
+            prices,
+            primary_asset=cfg.features.primary_asset,
+            roll_windows=list(cfg.features.roll_windows),
+        )
+        eco_features = eco_features.reindex(features.index)
+        features = pd.concat([features, eco_features], axis=1)
     n_features = features.shape[1]
     log.info(f"Features shape: {features.shape}")
 
@@ -171,13 +181,27 @@ def main(cfg: DictConfig) -> None:
         max_epochs=cfg.model.max_epochs,
         patience=cfg.model.patience,
         device=str(device),
+        encoder_type=getattr(cfg.model, 'encoder_type', 'mlp'),
+        encoder_dim=getattr(cfg.model, 'encoder_dim', 64),
+        conv_channels=getattr(cfg.model, 'conv_channels', 64),
+        conv_kernel_size=getattr(cfg.model, 'conv_kernel_size', 3),
+        tcn_channels=getattr(cfg.model, 'tcn_channels', 64),
+        tcn_kernel_size=getattr(cfg.model, 'tcn_kernel_size', 3),
+        tcn_dilations=list(getattr(cfg.model, 'tcn_dilations', [1, 2, 4, 8])),
+        use_skip_connection=getattr(cfg.model, 'use_skip_connection', False),
     )
 
     output_dir = Path(".")
     figures_dir = project_root / cfg.figures_dir / MODEL_NAME
 
+    artifact_dir = project_root / "predictions" / MODEL_NAME
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
     all_metrics: list[dict] = []
     all_fold_ids: list[int] = []
+
+    fold_start = getattr(cfg, 'fold_start', None)
+    fold_end = getattr(cfg, 'fold_end', None)
 
     for fold in build_folds(
         features,
@@ -186,6 +210,11 @@ def main(cfg: DictConfig) -> None:
         window_len=cfg.data.window_len,
         flat=False,
     ):
+        if fold_start is not None and fold.fold_id < fold_start:
+            continue
+        if fold_end is not None and fold.fold_id > fold_end:
+            break
+
         log.info(
             f"Fold {fold.fold_id}: "
             f"train={len(fold.train_y)} val={len(fold.val_y)} test={len(fold.test_y)}"
@@ -197,7 +226,22 @@ def main(cfg: DictConfig) -> None:
 
         y_pred = model.predict(fold.test_X)
         y_prob = model.predict_proba(fold.test_X)
+        val_prob = model.predict_proba(fold.val_X)
         result = evaluate(fold.test_y, y_pred, y_prob)
+
+        # Save val and test artifacts
+        n = len(y_pred)
+        test_dates_aligned = fold.test_dates[len(fold.test_dates) - n:]
+        PredictionArtifact(
+            fold_id=fold.fold_id, split="val", model_name=MODEL_NAME,
+            dates=np.array([str(d.date()) for d in fold.val_dates]),
+            true_labels=fold.val_y, probs=val_prob,
+        ).save(artifact_dir / f"fold_{fold.fold_id:02d}_val.parquet")
+        PredictionArtifact(
+            fold_id=fold.fold_id, split="test", model_name=MODEL_NAME,
+            dates=np.array([str(d.date()) for d in test_dates_aligned]),
+            true_labels=fold.test_y[:n], probs=y_prob,
+        ).save(artifact_dir / f"fold_{fold.fold_id:02d}_test.parquet")
 
         metrics_dict = {
             "fold_id": fold.fold_id,
@@ -219,10 +263,8 @@ def main(cfg: DictConfig) -> None:
         fold_dir.mkdir(exist_ok=True)
         (fold_dir / "metrics.json").write_text(json.dumps(metrics_dict, indent=2))
 
-        n = len(y_pred)
-        test_dates = fold.test_dates[len(fold.test_dates) - n:]
         plot_regime_timeline(
-            test_dates, fold.test_y[:n], y_pred,
+            test_dates_aligned, fold.test_y[:n], y_pred,
             figures_dir / f"fold_{fold.fold_id:02d}_timeline.png",
         )
         plot_confusion_matrix(

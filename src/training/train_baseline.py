@@ -21,6 +21,7 @@ from omegaconf import DictConfig, OmegaConf
 from src.data.download import fetch_all
 from src.data.manager import DataManager
 from src.evaluation.metrics import evaluate
+from src.evaluation.predictions import PredictionArtifact
 from src.features.engineer import FeaturesConfig, build_features
 from src.labels.quantile_labeler import LabelConfig, QuantileLabeler
 from src.models.baseline_xgb import RegimeXGB, XGBConfig
@@ -34,6 +35,8 @@ from src.visualization.plots import (
 )
 
 log = logging.getLogger(__name__)
+
+MODEL_NAME = "xgb"
 
 
 def _get_labels(
@@ -114,6 +117,9 @@ def main(cfg: DictConfig) -> None:
     output_dir = Path(".")  # Hydra sets CWD to output dir
     figures_dir = project_root / cfg.figures_dir
 
+    artifact_dir = project_root / "predictions" / MODEL_NAME
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
     all_metrics: list[dict] = []
     all_fold_ids: list[int] = []
     all_importances: list[np.ndarray] = []
@@ -144,6 +150,18 @@ def main(cfg: DictConfig) -> None:
         y_pred = model.predict(fold.test_X)
         y_prob = model.predict_proba(fold.test_X)
         result = evaluate(fold.test_y, y_pred, y_prob)
+
+        val_prob = model.predict_proba(fold.val_X)
+        PredictionArtifact(
+            fold_id=fold.fold_id, split="val", model_name=MODEL_NAME,
+            dates=np.array([str(d.date()) for d in fold.val_dates]),
+            true_labels=fold.val_y, probs=val_prob,
+        ).save(artifact_dir / f"fold_{fold.fold_id:02d}_val.parquet")
+        PredictionArtifact(
+            fold_id=fold.fold_id, split="test", model_name=MODEL_NAME,
+            dates=np.array([str(d.date()) for d in fold.test_dates]),
+            true_labels=fold.test_y, probs=y_prob,
+        ).save(artifact_dir / f"fold_{fold.fold_id:02d}_test.parquet")
 
         metrics_dict = {
             "fold_id": fold.fold_id,
