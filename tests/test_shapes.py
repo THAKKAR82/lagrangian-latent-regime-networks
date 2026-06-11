@@ -724,3 +724,45 @@ def test_eval_result_class_f1_in_range():
     y_pred = y_prob.argmax(axis=1)
     result = evaluate(y_true, y_pred, y_prob)
     assert np.all(result.class_f1 >= 0.0) and np.all(result.class_f1 <= 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Prediction artifact tests
+# ---------------------------------------------------------------------------
+
+from src.evaluation.predictions import PredictionArtifact
+
+
+def test_prediction_artifact_roundtrip(tmp_path):
+    rng = np.random.default_rng(2)
+    probs = np.abs(rng.standard_normal((50, 4))).astype(np.float32)
+    probs /= probs.sum(axis=1, keepdims=True)
+    dates = np.array([f"2020-01-{i+1:02d}" for i in range(50)])
+    labels = rng.integers(0, 4, 50)
+    art = PredictionArtifact(
+        fold_id=3, split="val", model_name="xgb",
+        dates=dates, true_labels=labels, probs=probs,
+    )
+    path = tmp_path / "fold_03_val.parquet"
+    art.save(path)
+    loaded = PredictionArtifact.load(path)
+    assert loaded.fold_id == 3
+    assert loaded.split == "val"
+    assert loaded.model_name == "xgb"
+    np.testing.assert_allclose(loaded.probs, probs, atol=1e-5)
+    np.testing.assert_array_equal(loaded.true_labels, labels)
+
+
+def test_prediction_artifact_to_dataframe_columns():
+    rng = np.random.default_rng(3)
+    probs = np.abs(rng.standard_normal((10, 4))).astype(np.float32)
+    probs /= probs.sum(axis=1, keepdims=True)
+    art = PredictionArtifact(
+        fold_id=0, split="test", model_name="lagrangian",
+        dates=np.array(["2021-01-01"] * 10),
+        true_labels=rng.integers(0, 4, 10), probs=probs,
+    )
+    df = art.to_dataframe()
+    required_cols = {"date", "fold_id", "split", "model", "true_label",
+                     "prob_0", "prob_1", "prob_2", "prob_3"}
+    assert required_cols.issubset(set(df.columns))
