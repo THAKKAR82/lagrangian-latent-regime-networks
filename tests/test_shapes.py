@@ -766,3 +766,41 @@ def test_prediction_artifact_to_dataframe_columns():
     required_cols = {"date", "fold_id", "split", "model", "true_label",
                      "prob_0", "prob_1", "prob_2", "prob_3"}
     assert required_cols.issubset(set(df.columns))
+
+
+# ---------------------------------------------------------------------------
+# Temperature Scaling tests
+# ---------------------------------------------------------------------------
+
+from src.postprocessing.temperature import TemperatureScaler
+
+
+def test_temperature_scaler_output_sums_to_one():
+    rng = np.random.default_rng(4)
+    probs = np.abs(rng.standard_normal((80, 4))).astype(np.float32)
+    probs /= probs.sum(axis=1, keepdims=True)
+    labels = rng.integers(0, 4, 80)
+    scaler = TemperatureScaler()
+    scaler.fit(probs, labels)
+    cal = scaler.transform(probs)
+    np.testing.assert_allclose(cal.sum(axis=1), 1.0, atol=1e-5)
+
+
+def test_temperature_scaler_temperature_positive():
+    rng = np.random.default_rng(5)
+    probs = np.abs(rng.standard_normal((80, 4))).astype(np.float32)
+    probs /= probs.sum(axis=1, keepdims=True)
+    labels = rng.integers(0, 4, 80)
+    scaler = TemperatureScaler()
+    scaler.fit(probs, labels)
+    assert scaler.temperature > 0.0
+
+
+def test_temperature_scaler_default_identity():
+    rng = np.random.default_rng(6)
+    probs = np.abs(rng.standard_normal((30, 4))).astype(np.float32)
+    probs /= probs.sum(axis=1, keepdims=True)
+    scaler = TemperatureScaler()
+    # T=1 => transform is identity
+    cal = scaler.transform(probs)
+    np.testing.assert_allclose(cal, probs, atol=1e-4)
