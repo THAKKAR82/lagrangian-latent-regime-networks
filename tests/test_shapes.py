@@ -804,3 +804,34 @@ def test_temperature_scaler_default_identity():
     # T=1 => transform is identity
     cal = scaler.transform(probs)
     np.testing.assert_allclose(cal, probs, atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# Weighted Ensemble tests
+# ---------------------------------------------------------------------------
+
+from src.postprocessing.ensemble import WeightedEnsemble, grid_search_weights
+
+
+def test_weighted_ensemble_output_shape():
+    rng = np.random.default_rng(7)
+    xgb_p = np.abs(rng.standard_normal((50, 4))).astype(np.float32)
+    xgb_p /= xgb_p.sum(axis=1, keepdims=True)
+    lag_p = np.abs(rng.standard_normal((50, 4))).astype(np.float32)
+    lag_p /= lag_p.sum(axis=1, keepdims=True)
+    ens = WeightedEnsemble(w_xgb=0.6, w_lag=0.4)
+    out = ens.predict_proba(xgb_p, lag_p)
+    assert out.shape == (50, 4)
+    np.testing.assert_allclose(out.sum(axis=1), 1.0, atol=1e-5)
+
+
+def test_grid_search_weights_returns_valid_pair():
+    rng = np.random.default_rng(8)
+    xgb_p = np.abs(rng.standard_normal((60, 4))).astype(np.float32)
+    xgb_p /= xgb_p.sum(axis=1, keepdims=True)
+    lag_p = np.abs(rng.standard_normal((60, 4))).astype(np.float32)
+    lag_p /= lag_p.sum(axis=1, keepdims=True)
+    labels = rng.integers(0, 4, 60)
+    w_xgb, w_lag = grid_search_weights(xgb_p, lag_p, labels)
+    assert abs(w_xgb + w_lag - 1.0) < 1e-5
+    assert 0.1 <= w_xgb <= 0.9

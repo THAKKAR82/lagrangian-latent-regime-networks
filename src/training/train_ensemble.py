@@ -30,6 +30,7 @@ from src.features.engineer import FeaturesConfig, build_features
 from src.labels.quantile_labeler import LabelConfig, QuantileLabeler
 from src.models.baseline_xgb import RegimeXGB, XGBConfig
 from src.models.lagrangian_regime_net import LagrangianConfig, LagrangianRegimeNet
+from src.postprocessing.ensemble import WeightedEnsemble, grid_search_weights
 from src.utils.dataset_builder import SplitConfig, build_folds
 from src.utils.reproducibility import set_global_seed
 from src.visualization.plots import (
@@ -190,8 +191,21 @@ def main(cfg: DictConfig) -> None:
         xgb_prob_aligned = xgb_prob[-n:]
         y_true = fold_f.test_y[-n:]
 
-        # Average ensemble
-        ens_prob = (xgb_prob_aligned + lag_prob) / 2.0
+        # Weighted ensemble with optional grid search
+        use_grid_search = getattr(cfg, "ensemble_grid_search", False)
+        if use_grid_search:
+            xgb_val_prob_ens = xgb.predict_proba(fold_f.val_X)
+            lag_val_prob_ens = lag.predict_proba(fold_s.val_X)
+            n_val = len(lag_val_prob_ens)
+            w_xgb, w_lag = grid_search_weights(
+                xgb_val_prob_ens[-n_val:], lag_val_prob_ens,
+                fold_f.val_y[-n_val:],
+            )
+            log.info(f"  Grid search: w_xgb={w_xgb:.1f}, w_lag={w_lag:.1f}")
+        else:
+            w_xgb, w_lag = 0.5, 0.5
+
+        ens_prob = WeightedEnsemble(w_xgb, w_lag).predict_proba(xgb_prob_aligned, lag_prob)
         y_pred = ens_prob.argmax(axis=1)
 
         result = evaluate(y_true, y_pred, ens_prob)
