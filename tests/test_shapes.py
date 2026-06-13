@@ -872,3 +872,52 @@ def test_fold_adaptive_weights_sum_to_one():
         ens.register_fold_val_f1(xgb_f1=0.40, lag_f1=0.38)
         w_xgb, w_lag = ens.get_weights(fold_id=3, train_size=1500)
         assert abs(w_xgb + w_lag - 1.0) < 1e-5, f"mode={mode} weights don't sum to 1"
+
+
+from src.postprocessing.stacker import LogisticStacker
+
+
+def test_logistic_stacker_fallback_without_history():
+    rng = np.random.default_rng(9)
+    stacker = LogisticStacker(min_folds=3)
+    xgb_p = np.abs(rng.standard_normal((20, 4))).astype(np.float32)
+    xgb_p /= xgb_p.sum(axis=1, keepdims=True)
+    lag_p = np.abs(rng.standard_normal((20, 4))).astype(np.float32)
+    lag_p /= lag_p.sum(axis=1, keepdims=True)
+    out = stacker.predict_proba(xgb_p, lag_p)
+    expected = (xgb_p + lag_p) / 2.0
+    np.testing.assert_allclose(out, expected, atol=1e-5)
+
+
+def test_logistic_stacker_fit_after_min_folds():
+    rng = np.random.default_rng(10)
+    stacker = LogisticStacker(min_folds=2)
+    for _ in range(3):
+        xv = np.abs(rng.standard_normal((60, 4))).astype(np.float32)
+        xv /= xv.sum(axis=1, keepdims=True)
+        lv = np.abs(rng.standard_normal((60, 4))).astype(np.float32)
+        lv /= lv.sum(axis=1, keepdims=True)
+        yl = rng.integers(0, 4, 60)
+        stacker.update(xv, lv, yl)
+    ready = stacker.fit()
+    assert ready, "Expected stacker to be ready after 3 folds"
+
+
+def test_logistic_stacker_output_shape_and_valid():
+    rng = np.random.default_rng(11)
+    stacker = LogisticStacker(min_folds=2)
+    for _ in range(3):
+        xv = np.abs(rng.standard_normal((60, 4))).astype(np.float32)
+        xv /= xv.sum(axis=1, keepdims=True)
+        lv = np.abs(rng.standard_normal((60, 4))).astype(np.float32)
+        lv /= lv.sum(axis=1, keepdims=True)
+        yl = rng.integers(0, 4, 60)
+        stacker.update(xv, lv, yl)
+    stacker.fit()
+    xp = np.abs(rng.standard_normal((30, 4))).astype(np.float32)
+    xp /= xp.sum(axis=1, keepdims=True)
+    lp = np.abs(rng.standard_normal((30, 4))).astype(np.float32)
+    lp /= lp.sum(axis=1, keepdims=True)
+    out = stacker.predict_proba(xp, lp)
+    assert out.shape == (30, 4)
+    np.testing.assert_allclose(out.sum(axis=1), 1.0, atol=1e-5)
