@@ -1065,3 +1065,62 @@ def test_multiscale_default_off():
         encoder_type="mlp", encoder_dim=32, n_steps=2,
     )
     assert not cfg.use_multi_timescale
+
+
+# Postprocessing pipeline smoke test (Task 14)
+from src.postprocessing.temperature import TemperatureScaler
+from src.postprocessing.ensemble import WeightedEnsemble
+from src.postprocessing.adaptive import FoldAdaptiveEnsemble
+from src.postprocessing.stacker import LogisticStacker
+from src.postprocessing.thresholds import ThresholdTuner
+
+
+def test_postprocessing_pipeline_smoke():
+    """End-to-end: temperature → ensemble → stacker → threshold across 4 folds."""
+    rng = np.random.default_rng(99)
+    n = 60
+
+    stacker = LogisticStacker(min_folds=2)
+    adaptive = FoldAdaptiveEnsemble(mode="previous_folds_val")
+
+    for fold_id in range(4):
+        xgb_val = np.abs(rng.standard_normal((n, 4))).astype(np.float32)
+        xgb_val /= xgb_val.sum(axis=1, keepdims=True)
+        lag_val = np.abs(rng.standard_normal((n, 4))).astype(np.float32)
+        lag_val /= lag_val.sum(axis=1, keepdims=True)
+        y_val = rng.integers(0, 4, n)
+
+        xgb_test = np.abs(rng.standard_normal((n, 4))).astype(np.float32)
+        xgb_test /= xgb_test.sum(axis=1, keepdims=True)
+        lag_test = np.abs(rng.standard_normal((n, 4))).astype(np.float32)
+        lag_test /= lag_test.sum(axis=1, keepdims=True)
+        y_test = rng.integers(0, 4, n)
+
+        # Temperature scaling (fit on val, apply to test)
+        xgb_scaler = TemperatureScaler().fit(xgb_val, y_val)
+        lag_scaler = TemperatureScaler().fit(lag_val, y_val)
+        xgb_test_cal = xgb_scaler.transform(xgb_test)
+        lag_test_cal = lag_scaler.transform(lag_test)
+
+        # Adaptive weights (leakage-safe: uses history from previous folds)
+        w_xgb, w_lag = adaptive.get_weights(fold_id, train_size=1000 + fold_id * 252)
+
+        # Stacker (fit uses history from previous folds only)
+        stacker.fit()
+        ens_probs = stacker.predict_proba(xgb_test_cal, lag_test_cal)
+
+        # Threshold tuning (fit on val ensemble, apply to stacked test)
+        ens_val = WeightedEnsemble(w_xgb, w_lag).predict_proba(xgb_val, lag_val)
+        tuner = ThresholdTuner().fit(ens_val, y_val)
+        preds = tuner.predict(ens_probs)
+
+        # Assertions
+        assert preds.shape == (n,)
+        assert set(preds).issubset({0, 1, 2, 3})
+        np.testing.assert_allclose(ens_probs.sum(axis=1), 1.0, atol=1e-5)
+
+        # Accumulate for next fold
+        stacker.update(xgb_val, lag_val, y_val)
+        val_acc_xgb = float((xgb_val.argmax(axis=1) == y_val).mean())
+        val_acc_lag = float((lag_val.argmax(axis=1) == y_val).mean())
+        adaptive.register_fold_val_f1(xgb_f1=val_acc_xgb, lag_f1=val_acc_lag)
