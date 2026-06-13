@@ -1027,3 +1027,41 @@ def test_make_class_weights_shape_and_positive():
     weights = make_class_weights(y)
     assert weights.shape == (4,)
     assert (weights > 0).all()
+
+
+# ---------------------------------------------------------------------------
+# Multi-timescale latent integration tests (Task 11)
+# ---------------------------------------------------------------------------
+
+def test_multiscale_output_shape():
+    cfg = LagrangianConfig(
+        input_dim=10, window_len=5, latent_dim=8, hidden_dim=32,
+        encoder_type="mlp", encoder_dim=32, n_steps=4,
+        use_multi_timescale=True, coarse_dt=5.0,
+    )
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 5, 10)
+    with torch.no_grad():
+        out = model(x)
+    assert out.shape == (4, 4)
+
+
+def test_multiscale_finite():
+    cfg = LagrangianConfig(
+        input_dim=10, window_len=5, latent_dim=8, hidden_dim=32,
+        encoder_type="mlp", encoder_dim=32, n_steps=4,
+        use_multi_timescale=True, coarse_dt=5.0,
+    )
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 5, 10)
+    with torch.no_grad():
+        out = model(x)
+    assert torch.isfinite(out).all()
+
+
+def test_multiscale_default_off():
+    cfg = LagrangianConfig(
+        input_dim=10, window_len=5, latent_dim=8, hidden_dim=32,
+        encoder_type="mlp", encoder_dim=32, n_steps=2,
+    )
+    assert not cfg.use_multi_timescale

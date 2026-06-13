@@ -53,6 +53,9 @@ class LagrangianConfig:
     use_skip_connection: bool = False
     # Transition auxiliary head: predicts binary regime-change signal
     use_transition_head: bool = False
+    # Multi-timescale latent integration
+    use_multi_timescale: bool = False
+    coarse_dt: float = 5.0
 
 
 def _softplus_inverse(y: float) -> float:
@@ -313,6 +316,14 @@ class LagrangianRegimeNet(nn.Module):
         self.norm = nn.LayerNorm(cfg.latent_dim)
         self.head = nn.Linear(cfg.latent_dim, 4)
 
+        if cfg.use_multi_timescale:
+            self.timescale_proj = nn.Linear(cfg.latent_dim * 2, cfg.latent_dim)
+            nn.init.zeros_(self.timescale_proj.weight)
+            nn.init.zeros_(self.timescale_proj.bias)
+            # Initialise so fine-scale gets weight 1, coarse gets weight 0 at start
+            with torch.no_grad():
+                self.timescale_proj.weight[:, :cfg.latent_dim] = torch.eye(cfg.latent_dim)
+
         if cfg.use_transition_head:
             self.transition_head = nn.Linear(cfg.latent_dim, 1)
             nn.init.normal_(self.transition_head.weight, std=0.01)
@@ -324,56 +335,52 @@ class LagrangianRegimeNet(nn.Module):
         """Run encoder -> (batch, encoder_dim)."""
         return self.encoder(x)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (batch, window_len, input_dim)
-        h = self._encode(x)
-        z = self.z0_head(h)           # (batch, latent_dim)
-        z_dot = self.z_dot0_head(h)   # (batch, latent_dim)
-
-        dt = self.cfg.dt
-        trajectory = []
-
+    def _integrate(
+        self, z: torch.Tensor, z_dot: torch.Tensor, x: torch.Tensor, dt: float
+    ) -> torch.Tensor:
+        """Run Lagrangian integrator for n_steps at given dt. Returns final z."""
         for _ in range(self.cfg.n_steps):
             z = z.requires_grad_(True)
-
-            if self.cfg.use_coord_transform:
-                q = self.coord_net(z)
-            else:
-                q = z
-
+            q = self.coord_net(z) if self.cfg.use_coord_transform else z
             V = self.potential_net(q)
-
             if torch.is_grad_enabled():
                 dV_dq = autograd.grad(V.sum(), q, create_graph=True)[0]
             else:
                 with torch.enable_grad():
-                    if self.cfg.use_coord_transform:
-                        z_tmp = z.detach().requires_grad_(True)
-                        q_tmp = self.coord_net(z_tmp)
-                    else:
-                        z_tmp = z.detach().requires_grad_(True)
-                        q_tmp = z_tmp
+                    z_tmp = z.detach().requires_grad_(True)
+                    q_tmp = self.coord_net(z_tmp) if self.cfg.use_coord_transform else z_tmp
                     V_tmp = self.potential_net(q_tmp)
                     dV_dq = autograd.grad(V_tmp.sum(), q_tmp)[0].detach()
-
             M_diag = self.mass_net(q)
-
             if self.cfg.use_vector_damping:
                 gamma_vec = F.softplus(self.gamma_net(q))
                 z_ddot = -(dV_dq + gamma_vec * z_dot) / M_diag
             else:
                 gamma = F.softplus(self.raw_gamma)
                 z_ddot = -(dV_dq + gamma * z_dot) / M_diag
-
             if self.cfg.use_forcing:
                 z_ddot = z_ddot + self.forcing_proj(x[:, -1, :])
-
             z_dot = z_dot + dt * z_ddot
             z = z + dt * z_dot
+        return z
 
-            trajectory.append(z.detach())
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (batch, window_len, input_dim)
+        h = self._encode(x)
+        z0 = self.z0_head(h)           # (batch, latent_dim)
+        z_dot0 = self.z_dot0_head(h)   # (batch, latent_dim)
 
-        self.last_trajectory = trajectory
+        z = self._integrate(z0, z_dot0, x, self.cfg.dt)
+        self.last_trajectory = [z.detach()] * self.cfg.n_steps
+
+        if self.cfg.use_multi_timescale:
+            z_coarse = self._integrate(
+                z0.detach().requires_grad_(False),
+                z_dot0.detach().requires_grad_(False),
+                x,
+                self.cfg.coarse_dt,
+            )
+            z = self.timescale_proj(torch.cat([z, z_coarse], dim=-1))
 
         if self.cfg.use_skip_connection:
             z = z + self.skip_proj(x[:, -1, :])

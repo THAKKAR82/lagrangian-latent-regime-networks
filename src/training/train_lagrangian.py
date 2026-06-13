@@ -230,6 +230,8 @@ def main(cfg: DictConfig) -> None:
         tcn_dilations=list(getattr(cfg.model, 'tcn_dilations', [1, 2, 4, 8])),
         use_skip_connection=getattr(cfg.model, 'use_skip_connection', False),
         use_transition_head=getattr(cfg.model, 'use_transition_head', False),
+        use_multi_timescale=getattr(cfg.model, 'use_multi_timescale', False),
+        coarse_dt=getattr(cfg.model, 'coarse_dt', 5.0),
     )
 
     output_dir = Path(".")
