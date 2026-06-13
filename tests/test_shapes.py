@@ -835,3 +835,40 @@ def test_grid_search_weights_returns_valid_pair():
     w_xgb, w_lag = grid_search_weights(xgb_p, lag_p, labels)
     assert abs(w_xgb + w_lag - 1.0) < 1e-5
     assert 0.1 <= w_xgb <= 0.9
+
+
+# ---------------------------------------------------------------------------
+# Fold-Adaptive Ensemble tests
+# ---------------------------------------------------------------------------
+
+from src.postprocessing.adaptive import FoldAdaptiveEnsemble
+
+
+def test_fold_adaptive_equal_mode():
+    ens = FoldAdaptiveEnsemble(mode="equal")
+    w_xgb, w_lag = ens.get_weights(fold_id=5, train_size=2000)
+    assert abs(w_xgb - 0.5) < 1e-5 and abs(w_lag - 0.5) < 1e-5
+
+
+def test_fold_adaptive_training_size_mode():
+    ens = FoldAdaptiveEnsemble(mode="training_size", size_threshold=1000)
+    w_xgb_small, _ = ens.get_weights(fold_id=1, train_size=500)
+    w_xgb_large, _ = ens.get_weights(fold_id=10, train_size=5000)
+    assert w_xgb_small <= w_xgb_large
+
+
+def test_fold_adaptive_previous_folds_val_fallback():
+    ens = FoldAdaptiveEnsemble(mode="previous_folds_val")
+    w_xgb, w_lag = ens.get_weights(fold_id=0, train_size=1000)
+    assert abs(w_xgb - 0.5) < 1e-5
+    ens.register_fold_val_f1(xgb_f1=0.45, lag_f1=0.35)
+    w_xgb2, w_lag2 = ens.get_weights(fold_id=1, train_size=1000)
+    assert w_xgb2 > w_lag2
+
+
+def test_fold_adaptive_weights_sum_to_one():
+    for mode in ("equal", "training_size", "previous_folds_val"):
+        ens = FoldAdaptiveEnsemble(mode=mode)
+        ens.register_fold_val_f1(xgb_f1=0.40, lag_f1=0.38)
+        w_xgb, w_lag = ens.get_weights(fold_id=3, train_size=1500)
+        assert abs(w_xgb + w_lag - 1.0) < 1e-5, f"mode={mode} weights don't sum to 1"
