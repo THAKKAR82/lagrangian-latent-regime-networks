@@ -957,3 +957,41 @@ def test_threshold_tuner_no_silent_failure():
     preds = tuner.predict(probs)
     assert preds.shape == (10,)
     assert set(preds).issubset({0, 1, 2, 3})
+
+
+# Transition head tests (Task 9)
+from src.models.lagrangian_regime_net import LagrangianConfig, LagrangianRegimeNet
+
+
+def test_transition_head_output_shape():
+    cfg = LagrangianConfig(
+        input_dim=10, window_len=5, latent_dim=8, hidden_dim=32,
+        encoder_type="mlp", encoder_dim=32, n_steps=2,
+        use_transition_head=True,
+    )
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 5, 10)
+    logits, trans_logits = model.forward_with_transition(x)
+    assert logits.shape == (4, 4)
+    assert trans_logits.shape == (4, 1)
+
+
+def test_transition_head_default_off():
+    cfg = LagrangianConfig(
+        input_dim=10, window_len=5, latent_dim=8, hidden_dim=32,
+        encoder_type="mlp", encoder_dim=32, n_steps=2,
+    )
+    assert not cfg.use_transition_head
+
+
+def test_transition_head_finite():
+    cfg = LagrangianConfig(
+        input_dim=10, window_len=5, latent_dim=8, hidden_dim=32,
+        encoder_type="mlp", encoder_dim=32, n_steps=2,
+        use_transition_head=True,
+    )
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 5, 10)
+    logits, trans_logits = model.forward_with_transition(x)
+    assert torch.isfinite(logits).all()
+    assert torch.isfinite(trans_logits).all()

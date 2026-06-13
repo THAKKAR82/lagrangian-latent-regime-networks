@@ -56,6 +56,7 @@ def _train_fold(
     fold,
     cfg: DictConfig,
     device: torch.device,
+    lag_cfg: "LagrangianConfig | None" = None,
 ) -> nn.Module:
     """Train one fold: Adam + CrossEntropyLoss + early stopping + gradient clipping."""
     X_tr = torch.from_numpy(fold.train_X).float()
@@ -83,7 +84,16 @@ def _train_fold(
         for X_batch, y_batch in loader:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
-            loss = criterion(model(X_batch), y_batch)
+            if lag_cfg is not None and lag_cfg.use_transition_head:
+                trans_labels = torch.zeros(len(y_batch), 1, dtype=torch.float32, device=device)
+                if len(y_batch) > 1:
+                    trans_labels[1:, 0] = (y_batch[1:] != y_batch[:-1]).float()
+                regime_logits, trans_logits = model.forward_with_transition(X_batch)
+                loss = criterion(regime_logits, y_batch) + 0.1 * nn.functional.binary_cross_entropy_with_logits(
+                    trans_logits, trans_labels
+                )
+            else:
+                loss = criterion(model(X_batch), y_batch)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -189,6 +199,7 @@ def main(cfg: DictConfig) -> None:
         tcn_kernel_size=getattr(cfg.model, 'tcn_kernel_size', 3),
         tcn_dilations=list(getattr(cfg.model, 'tcn_dilations', [1, 2, 4, 8])),
         use_skip_connection=getattr(cfg.model, 'use_skip_connection', False),
+        use_transition_head=getattr(cfg.model, 'use_transition_head', False),
     )
 
     output_dir = Path(".")
@@ -222,7 +233,7 @@ def main(cfg: DictConfig) -> None:
 
         torch.manual_seed(cfg.seed)
         model = LagrangianRegimeNet(lag_cfg)
-        model = _train_fold(model, fold, cfg, device)
+        model = _train_fold(model, fold, cfg, device, lag_cfg=lag_cfg)
 
         y_pred = model.predict(fold.test_X)
         y_prob = model.predict_proba(fold.test_X)
