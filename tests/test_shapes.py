@@ -921,3 +921,39 @@ def test_logistic_stacker_output_shape_and_valid():
     out = stacker.predict_proba(xp, lp)
     assert out.shape == (30, 4)
     np.testing.assert_allclose(out.sum(axis=1), 1.0, atol=1e-5)
+
+
+from src.postprocessing.thresholds import ThresholdTuner
+
+
+def test_threshold_tuner_output_in_range():
+    rng = np.random.default_rng(12)
+    probs = np.abs(rng.standard_normal((80, 4))).astype(np.float32)
+    probs /= probs.sum(axis=1, keepdims=True)
+    labels = rng.integers(0, 4, 80)
+    tuner = ThresholdTuner()
+    tuner.fit(probs, labels)
+    preds = tuner.predict(probs)
+    assert set(preds).issubset({0, 1, 2, 3})
+
+
+def test_threshold_tuner_thresholds_shape():
+    rng = np.random.default_rng(13)
+    probs = np.abs(rng.standard_normal((80, 4))).astype(np.float32)
+    probs /= probs.sum(axis=1, keepdims=True)
+    labels = rng.integers(0, 4, 80)
+    tuner = ThresholdTuner()
+    tuner.fit(probs, labels)
+    assert tuner.thresholds.shape == (4,)
+    assert np.all(tuner.thresholds >= 0.1) and np.all(tuner.thresholds <= 0.9)
+
+
+def test_threshold_tuner_no_silent_failure():
+    """If no class ever exceeds its threshold, predict must still return valid labels."""
+    rng = np.random.default_rng(14)
+    probs = np.full((10, 4), 0.25, dtype=np.float32)
+    tuner = ThresholdTuner()
+    tuner.thresholds = np.full(4, 0.9)  # impossible threshold
+    preds = tuner.predict(probs)
+    assert preds.shape == (10,)
+    assert set(preds).issubset({0, 1, 2, 3})
