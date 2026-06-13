@@ -995,3 +995,35 @@ def test_transition_head_finite():
     logits, trans_logits = model.forward_with_transition(x)
     assert torch.isfinite(logits).all()
     assert torch.isfinite(trans_logits).all()
+
+
+# ---------------------------------------------------------------------------
+# Class-aware loss tests (Task 10)
+# ---------------------------------------------------------------------------
+
+from src.training.train_lagrangian import focal_loss, make_class_weights
+
+
+def test_focal_loss_shape():
+    logits = torch.randn(16, 4)
+    targets = torch.randint(0, 4, (16,))
+    loss = focal_loss(logits, targets, gamma=2.0)
+    assert loss.shape == ()
+    assert torch.isfinite(loss)
+
+
+def test_focal_loss_lower_than_ce_on_easy_samples():
+    logits = torch.zeros(4, 4)
+    for i in range(4):
+        logits[i, i] = 10.0  # very confident correct prediction
+    targets = torch.arange(4)
+    fl = focal_loss(logits, targets, gamma=2.0)
+    ce = torch.nn.functional.cross_entropy(logits, targets)
+    assert fl < ce
+
+
+def test_make_class_weights_shape_and_positive():
+    y = np.array([0, 0, 0, 1, 2, 2, 3])
+    weights = make_class_weights(y)
+    assert weights.shape == (4,)
+    assert (weights > 0).all()

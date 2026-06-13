@@ -41,6 +41,31 @@ log = logging.getLogger(__name__)
 MODEL_NAME = "lagrangian"
 
 
+def focal_loss(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    gamma: float = 2.0,
+    weight: "torch.Tensor | None" = None,
+) -> torch.Tensor:
+    """Focal loss: -(1 - p_t)^gamma * log(p_t). Reduces loss for easy samples."""
+    log_p = nn.functional.log_softmax(logits, dim=-1)
+    p = torch.exp(log_p)
+    p_t = p.gather(1, targets.unsqueeze(1)).squeeze(1)
+    loss = -((1 - p_t) ** gamma) * log_p.gather(1, targets.unsqueeze(1)).squeeze(1)
+    if weight is not None:
+        w = weight[targets]
+        loss = loss * w
+    return loss.mean()
+
+
+def make_class_weights(y: np.ndarray) -> np.ndarray:
+    """Inverse class frequency weights, normalised to sum to n_classes."""
+    counts = np.bincount(y, minlength=4).astype(float)
+    counts = np.where(counts == 0, 1.0, counts)
+    weights = 1.0 / counts
+    return (weights / weights.sum() * 4).astype(np.float32)
+
+
 def _get_labels(
     spy_prices: pd.DataFrame,
     label_cfg: LabelConfig,
@@ -57,6 +82,8 @@ def _train_fold(
     cfg: DictConfig,
     device: torch.device,
     lag_cfg: "LagrangianConfig | None" = None,
+    loss_type: str = "ce",
+    class_weights: "torch.Tensor | None" = None,
 ) -> nn.Module:
     """Train one fold: Adam + CrossEntropyLoss + early stopping + gradient clipping."""
     X_tr = torch.from_numpy(fold.train_X).float()
@@ -73,7 +100,7 @@ def _train_fold(
 
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.model.lr)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(weight=class_weights) if loss_type == "weighted_ce" else nn.CrossEntropyLoss()
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -93,7 +120,10 @@ def _train_fold(
                     trans_logits, trans_labels
                 )
             else:
-                loss = criterion(model(X_batch), y_batch)
+                if loss_type == "focal":
+                    loss = focal_loss(model(X_batch), y_batch, gamma=2.0, weight=class_weights)
+                else:
+                    loss = criterion(model(X_batch), y_batch)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -208,6 +238,8 @@ def main(cfg: DictConfig) -> None:
     artifact_dir = project_root / "predictions" / MODEL_NAME
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
+    loss_type = getattr(cfg.model, "loss_type", "ce")
+
     all_metrics: list[dict] = []
     all_fold_ids: list[int] = []
 
@@ -233,7 +265,13 @@ def main(cfg: DictConfig) -> None:
 
         torch.manual_seed(cfg.seed)
         model = LagrangianRegimeNet(lag_cfg)
-        model = _train_fold(model, fold, cfg, device, lag_cfg=lag_cfg)
+
+        class_weights_t: torch.Tensor | None = None
+        if loss_type in ("weighted_ce", "focal"):
+            class_weights_np = make_class_weights(fold.train_y)
+            class_weights_t = torch.tensor(class_weights_np, dtype=torch.float32).to(device)
+
+        model = _train_fold(model, fold, cfg, device, lag_cfg=lag_cfg, loss_type=loss_type, class_weights=class_weights_t)
 
         y_pred = model.predict(fold.test_X)
         y_prob = model.predict_proba(fold.test_X)
