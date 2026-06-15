@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lagrangian Latent Regime Networks</title>
+  <meta name="description" content="A research platform benchmarking structured latent-dynamics models for financial market regime classification.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,700;1,9..144,300&family=Jost:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #07090F;
+      --bg-surface:  #0B0E18;
+      --bg-card:     #0F1320;
+      --border:      #181E30;
+      --border-hi:   #283050;
+      --text-1:      #DCE4F2;
+      --text-2:      #66748F;
+      --text-3:      #343E58;
+      --cyan:        #00D4FF;
+      --cyan-bg:     rgba(0,212,255,0.06);
+      --green:       #10B981;
+      --amber:       #F59E0B;
+      --red:         #EF4444;
+      --purple:      #8B5CF6;
+      --fd:          'Fraunces', Georgia, serif;
+      --fb:          'Jost', system-ui, sans-serif;
+      --fm:          'JetBrains Mono', monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text-1);
+      font-family: var(--fb);
+      font-weight: 400;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── NAV ─────────────────────────────────────────────────────────── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      height: 56px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 2rem;
+      background: rgba(7,9,15,0.85);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      font-family: var(--fm);
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--cyan);
+      letter-spacing: 0.16em;
+      text-decoration: none;
+    }
+
+    .nav-links {
+      display: flex; align-items: center; gap: 1.8rem;
+    }
+
+    .nav-links a {
+      font-size: 0.80rem;
+      color: var(--text-2);
+      text-decoration: none;
+      letter-spacing: 0.03em;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text-1); }
+
+    .nav-gh {
+      font-size: 0.76rem !important;
+      font-weight: 500 !important;
+      color: var(--text-1) !important;
+      border: 1px solid var(--border-hi) !important;
+      padding: 0.30rem 0.85rem;
+      border-radius: 4px;
+      transition: border-color 0.2s, color 0.2s !important;
+    }
+    .nav-gh:hover {
+      border-color: var(--cyan) !important;
+      color: var(--cyan) !important;
+    }
+
+    /* ── HERO ────────────────────────────────────────────────────────── */
+    .hero {
+      position: relative;
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      padding: 56px 2rem 0;
+    }
+
+    #hero-canvas {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+    }
+
+    .hero-overlay {
+      position: absolute; inset: 0;
+      background: linear-gradient(
+        to bottom,
+        rgba(7,9,15,0.65) 0%,
+        rgba(7,9,15,0.15) 45%,
+        rgba(7,9,15,0.72) 100%
+      );
+    }
+
+    .hero-content {
+      position: relative; z-index: 10;
+      text-align: center;
+      max-width: 840px;
+      padding: 4.5rem 0 4rem;
+    }
+
+    .hero-tag {
+      display: inline-block;
+      font-family: var(--fm);
+      font-size: 0.68rem;
+      font-weight: 500;
+      color: var(--cyan);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      padding: 0.28rem 0.75rem;
+      border: 1px solid rgba(0,212,255,0.22);
+      border-radius: 2px;
+      background: rgba(0,212,255,0.05);
+      margin-bottom: 1.5rem;
+    }
+
+    .hero-title {
+      font-family: var(--fd);
+      font-size: clamp(2.8rem, 6.5vw, 5.2rem);
+      font-weight: 700;
+      line-height: 1.08;
+      letter-spacing: -0.025em;
+      color: var(--text-1);
+      margin-bottom: 0;
+    }
+
+    .hero-title em {
+      font-weight: 300;
+      font-style: italic;
+      color: var(--cyan);
+    }
+
+    .hero-sub {
+      font-size: 1.02rem;
+      color: var(--text-2);
+      max-width: 540px;
+      margin: 1.6rem auto 2.6rem;
+      line-height: 1.75;
+      font-weight: 300;
+    }
+
+    .hero-stats {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2.2rem;
+      margin-bottom: 2rem;
+    }
+
+    .stat-item { text-align: center; }
+
+    .stat-n {
+      font-family: var(--fd);
+      font-size: 2.1rem;
+      font-weight: 700;
+      color: var(--text-1);
+      line-height: 1;
+      display: block;
+    }
+
+    .stat-l {
+      font-family: var(--fm);
+      font-size: 0.60rem;
+      color: var(--text-3);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-top: 0.28rem;
+      display: block;
+    }
+
+    .stat-pipe {
+      width: 1px;
+      height: 32px;
+      background: var(--border-hi);
+    }
+
+    .regime-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0.45rem;
+      margin-bottom: 2.4rem;
+    }
+
+    .rp {
+      font-family: var(--fm);
+      font-size: 0.68rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      padding: 0.26rem 0.72rem;
+      border-radius: 3px;
+      border: 1px solid;
+    }
+
+    .rp-bc { color: #10B981; border-color: rgba(16,185,129,.3); background: rgba(16,185,129,.07); }
+    .rp-bs { color: #F59E0B; border-color: rgba(245,158,11,.3); background: rgba(245,158,11,.07); }
+    .rp-ec { color: #EF4444; border-color: rgba(239,68,68,.3);  background: rgba(239,68,68,.07);  }
+    .rp-es { color: #8B5CF6; border-color: rgba(139,92,246,.3); background: rgba(139,92,246,.07); }
+
+    .btn-gh {
+      display: inline-flex; align-items: center; gap: 0.45rem;
+      font-family: var(--fb);
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: #07090F;
+      background: var(--cyan);
+      padding: 0.72rem 2rem;
+      border-radius: 4px;
+      text-decoration: none;
+      letter-spacing: 0.02em;
+      transition: opacity 0.2s, transform 0.2s;
+    }
+    .btn-gh:hover { opacity: 0.88; transform: translateY(-1px); }
+
+    .hero-scroll-hint {
+      position: absolute;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.4rem;
+      opacity: 0.35;
+      animation: bounce 2.4s ease-in-out infinite;
+    }
+
+    .hero-scroll-hint span {
+      font-family: var(--fm);
+      font-size: 0.58rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text-2);
+    }
+
+    .scroll-arrow {
+      width: 10px; height: 10px;
+      border-right: 1.5px solid var(--text-2);
+      border-bottom: 1.5px solid var(--text-2);
+      transform: rotate(45deg);
+    }
+
+    @keyframes bounce {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      50%       { transform: translateX(-50%) translateY(5px); }
+    }
+
+    /* ── SECTIONS ────────────────────────────────────────────────────── */
+    .section { padding: 96px 2rem; }
+    .section-alt { background: var(--bg-surface); }
+
+    .container { max-width: 1040px; margin: 0 auto; }
+
+    .eyebrow {
+      font-family: var(--fm);
+      font-size: 0.65rem;
+      font-weight: 500;
+      color: var(--cyan);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 0.7rem;
+    }
+
+    .stitle {
+      font-family: var(--fd);
+      font-size: clamp(1.85rem, 3.5vw, 2.75rem);
+      font-weight: 700;
+      letter-spacing: -0.022em;
+      color: var(--text-1);
+      margin-bottom: 0.9rem;
+    }
+
+    .sdesc {
+      font-size: 0.96rem;
+      color: var(--text-2);
+      max-width: 600px;
+      line-height: 1.8;
+      margin-bottom: 3rem;
+      font-weight: 300;
+    }
+
+    /* ── TABLE ───────────────────────────────────────────────────────── */
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 1.1rem;
+    }
+
+    .bt {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.90rem;
+    }
+
+    .bt thead th {
+      padding: 0.85rem 1.2rem;
+      text-align: left;
+      font-family: var(--fm);
+      font-size: 0.63rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .bt tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.18s;
+    }
+    .bt tbody tr:last-child { border-bottom: none; }
+    .bt tbody tr:hover { background: rgba(255,255,255,0.018); }
+
+    .bt td {
+      padding: 0.82rem 1.2rem;
+      color: var(--text-2);
+    }
+    .bt td:first-child {
+      color: var(--text-1);
+      font-weight: 500;
+    }
+
+    .nm {
+      font-family: var(--fm);
+      font-size: 0.83rem;
+      text-align: right;
+    }
+
+    .best-row { background: rgba(0,212,255,0.035); }
+    .best-row td:first-child { color: var(--cyan) !important; }
+    .nc { color: var(--cyan) !important; }
+    .ng { color: var(--green) !important; }
+    .nd { color: var(--text-3); }
+
+    .t-note {
+      font-family: var(--fm);
+      font-size: 0.75rem;
+      color: var(--text-3);
+      line-height: 1.6;
+    }
+
+    /* ── ARCHITECTURE ────────────────────────────────────────────────── */
+    .arch-wrap {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #F5F6F8;
+      margin-bottom: 2.5rem;
+    }
+
+    .arch-wrap img { width: 100%; display: block; }
+
+    .arch-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+
+    .acard {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.25rem 1.35rem;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .acard:hover {
+      border-color: var(--border-hi);
+      transform: translateY(-2px);
+    }
+
+    .acard-tag {
+      font-family: var(--fm);
+      font-size: 0.61rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--cyan);
+      margin-bottom: 0.5rem;
+    }
+
+    .acard h4 {
+      font-size: 0.91rem;
+      font-weight: 600;
+      color: var(--text-1);
+      margin-bottom: 0.4rem;
+    }
+
+    .acard p {
+      font-size: 0.80rem;
+      color: var(--text-2);
+      line-height: 1.65;
+      font-weight: 300;
+    }
+
+    /* ── FINDINGS ────────────────────────────────────────────────────── */
+    .findings-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.2rem;
+    }
+
+    .fcard {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.8rem 1.5rem;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .fcard:hover {
+      border-color: var(--border-hi);
+      transform: translateY(-2px);
+    }
+
+    .fcard::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+    }
+    .fc1::before { background: linear-gradient(90deg, var(--cyan), transparent); }
+    .fc2::before { background: linear-gradient(90deg, var(--green), transparent); }
+    .fc3::before { background: linear-gradient(90deg, var(--amber), transparent); }
+    .fc4::before { background: linear-gradient(90deg, var(--purple), transparent); }
+
+    .fnum {
+      font-family: var(--fd);
+      font-size: 2.4rem;
+      font-weight: 700;
+      color: var(--text-3);
+      line-height: 1;
+      margin-bottom: 0.9rem;
+      opacity: 0.5;
+    }
+
+    .fcard h3 {
+      font-size: 0.93rem;
+      font-weight: 600;
+      color: var(--text-1);
+      margin-bottom: 0.55rem;
+      line-height: 1.4;
+    }
+
+    .fcard p {
+      font-size: 0.81rem;
+      color: var(--text-2);
+      line-height: 1.68;
+      font-weight: 300;
+    }
+
+    /* ── CODE BLOCK ─────────────────────────────────────────────────── */
+    .cblock {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .cblock-hdr {
+      display: flex; align-items: center; gap: 0.45rem;
+      padding: 0.7rem 1.2rem;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .cd { width: 10px; height: 10px; border-radius: 50%; }
+    .cd-r { background: #EF4444; }
+    .cd-y { background: #F59E0B; }
+    .cd-g { background: #10B981; }
+
+    .clang {
+      margin-left: auto;
+      font-family: var(--fm);
+      font-size: 0.62rem;
+      color: var(--text-3);
+      letter-spacing: 0.1em;
+    }
+
+    .cblock pre { padding: 1.5rem 1.6rem; overflow-x: auto; }
+
+    .cblock code {
+      font-family: var(--fm);
+      font-size: 0.82rem;
+      line-height: 1.75;
+      color: var(--text-2);
+      white-space: pre;
+    }
+
+    .cc { color: var(--text-3); }
+    .ck { color: var(--cyan); }
+    .cf { color: var(--amber); }
+
+    /* ── FOOTER ─────────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2.5rem 2rem;
+    }
+
+    .footer-inner {
+      max-width: 1040px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .foot-logo {
+      font-family: var(--fm);
+      font-size: 0.76rem;
+      color: var(--cyan);
+      letter-spacing: 0.14em;
+    }
+
+    .foot-links {
+      display: flex; gap: 1.6rem;
+    }
+
+    .foot-links a {
+      font-size: 0.78rem;
+      color: var(--text-3);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .foot-links a:hover { color: var(--text-2); }
+
+    .foot-note {
+      font-size: 0.72rem;
+      color: var(--text-3);
+      font-weight: 300;
+      text-align: center;
+    }
+
+    /* ── FADE ANIMATIONS ─────────────────────────────────────────────── */
+    .fu {
+      opacity: 0;
+      transform: translateY(22px);
+      transition: opacity 0.65s ease, transform 0.65s ease;
+    }
+    .fu.vis { opacity: 1; transform: translateY(0); }
+
+    /* ── RESPONSIVE ─────────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .nav-links a:not(.nav-gh) { display: none; }
+      .hero-stats { gap: 1.2rem; }
+      .stat-n { font-size: 1.65rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV ─────────────────────────────────────────────────────────────────── -->
+<nav>
+  <a class="nav-logo" href="#">LLRN</a>
+  <div class="nav-links">
+    <a href="#benchmark">Benchmark</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#findings">Findings</a>
+    <a href="#quickstart">Quick Start</a>
+    <a href="https://github.com/THAKKAR82/lagrangian-latent-regime-networks"
+       class="nav-gh" target="_blank" rel="noopener">GitHub ↗</a>
+  </div>
+</nav>
+
+<!-- HERO ─────────────────────────────────────────────────────────────────── -->
+<section class="hero">
+  <canvas id="hero-canvas"></canvas>
+  <div class="hero-overlay"></div>
+
+  <div class="hero-content">
+    <span class="hero-tag">Research Platform · 2004 – 2026</span>
+
+    <h1 class="hero-title">
+      Lagrangian<br>
+      <em>Latent Regime</em><br>
+      Networks
+    </h1>
+
+    <p class="hero-sub">
+      Does imposing Hamiltonian energy dynamics on a latent space
+      produce better-calibrated market regime predictions?
+    </p>
+
+    <div class="hero-stats">
+      <div class="stat-item">
+        <span class="stat-n">71</span>
+        <span class="stat-l">walk-forward folds</span>
+      </div>
+      <div class="stat-pipe"></div>
+      <div class="stat-item">
+        <span class="stat-n">0.4046</span>
+        <span class="stat-l">best macro F1</span>
+      </div>
+      <div class="stat-pipe"></div>
+      <div class="stat-item">
+        <span class="stat-n">22yr</span>
+        <span class="stat-l">data span</span>
+      </div>
+    </div>
+
+    <div class="regime-row">
+      <span class="rp rp-bc">Bull / Calm</span>
+      <span class="rp rp-bs">Bull / Stress</span>
+      <span class="rp rp-ec">Bear / Calm</span>
+      <span class="rp rp-es">Bear / Stress</span>
+    </div>
+
+    <a href="https://github.com/THAKKAR82/lagrangian-latent-regime-networks"
+       class="btn-gh" target="_blank" rel="noopener">
+      View on GitHub ↗
+    </a>
+  </div>
+
+  <div class="hero-scroll-hint">
+    <span>scroll</span>
+    <div class="scroll-arrow"></div>
+  </div>
+</section>
+
+<!-- BENCHMARK ───────────────────────────────────────────────────────────── -->
+<section id="benchmark" class="section">
+  <div class="container">
+    <p class="eyebrow fu">Results</p>
+    <h2 class="stitle fu">Benchmark Results</h2>
+    <p class="sdesc fu">
+      71 walk-forward folds · expanding train window · val = test = 252 days ·
+      SPY, QQQ, TLT, GLD, ^VIX · 2004–2026
+    </p>
+
+    <div class="table-wrap fu">
+      <table class="bt">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th style="text-align:right">Mean Macro F1 ↑</th>
+            <th style="text-align:right">Mean Brier ↓</th>
+            <th style="text-align:right">Mean ECE ↓</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="best-row">
+            <td>⭐ Ensemble (XGBoost + conv1d)</td>
+            <td class="nm nc">0.4046</td>
+            <td class="nm nc">0.5899</td>
+            <td class="nm nc">0.1210</td>
+          </tr>
+          <tr>
+            <td>XGBoost</td>
+            <td class="nm ng">0.4208</td>
+            <td class="nm">0.6246</td>
+            <td class="nm">0.1678</td>
+          </tr>
+          <tr>
+            <td>LSTM</td>
+            <td class="nm">0.4062</td>
+            <td class="nm">0.6152</td>
+            <td class="nm">0.1477</td>
+          </tr>
+          <tr>
+            <td>GRU</td>
+            <td class="nm">0.4008</td>
+            <td class="nm">0.6071</td>
+            <td class="nm">0.1477</td>
+          </tr>
+          <tr>
+            <td>Lagrangian conv1d</td>
+            <td class="nm">0.3976</td>
+            <td class="nm">0.6214</td>
+            <td class="nm">0.1473</td>
+          </tr>
+          <tr>
+            <td>Neural ODE</td>
+            <td class="nm">0.3850</td>
+            <td class="nm">0.6281</td>
+            <td class="nm">0.1450</td>
+          </tr>
+          <tr>
+            <td>Lagrangian v3 (MLP)</td>
+            <td class="nm nd">0.3700</td>
+            <td class="nm nd">0.6373</td>
+            <td class="nm">0.1258</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="t-note fu">
+      Ensemble wins on calibration (best ECE + Brier). XGBoost leads raw F1 but
+      underperforms on early folds due to limited training data. Lower Brier and ECE are better.
+    </p>
+  </div>
+</section>
+
+<!-- ARCHITECTURE ─────────────────────────────────────────────────────────── -->
+<section id="architecture" class="section section-alt">
+  <div class="container">
+    <p class="eyebrow fu">Model Design</p>
+    <h2 class="stitle fu">Architecture</h2>
+    <p class="sdesc fu">
+      A 40-day window is encoded into a shared embedding, then split into initial
+      position z₀ and velocity ż₀. A symplectic Euler integrator evolves the state
+      through a learned energy landscape before classification.
+    </p>
+
+    <div class="arch-wrap fu">
+      <img src="images/architecture.png"
+           alt="LagrangianRegimeNet architecture — horizontal flow from input through encoder, latent heads, symplectic integration, and classifier to 4 regime classes">
+    </div>
+
+    <div class="arch-grid">
+      <div class="acard fu">
+        <div class="acard-tag">Encoder</div>
+        <h4>Causal Conv1D</h4>
+        <p>Two causal conv layers with left-padding only. Last-step readout. Outperforms flat MLP by +2.8pp across 71 folds.</p>
+      </div>
+      <div class="acard fu">
+        <div class="acard-tag">Dynamics</div>
+        <h4>Symplectic Euler</h4>
+        <p>Velocity-first update preserves the Hamiltonian structure. Potential V and damping γ are both learned from data.</p>
+      </div>
+      <div class="acard fu">
+        <div class="acard-tag">Classifier</div>
+        <h4>LayerNorm → Linear</h4>
+        <p>Minimal head on the final latent state. 4-class softmax for BullCalm, BullStress, BearCalm, BearStress.</p>
+      </div>
+      <div class="acard fu">
+        <div class="acard-tag">Damping</div>
+        <h4>Scalar / Vector / None</h4>
+        <p>Three mutually exclusive modes via YAML config. Scalar damping consistently beat more expressive vector variants.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FINDINGS ─────────────────────────────────────────────────────────────── -->
+<section id="findings" class="section">
+  <div class="container">
+    <p class="eyebrow fu">Research Findings</p>
+    <h2 class="stitle fu">Key Insights</h2>
+
+    <div class="findings-grid">
+      <div class="fcard fc1 fu">
+        <div class="fnum">01</div>
+        <h3>Encoder &gt; Dynamics</h3>
+        <p>Swapping the flat MLP encoder for causal Conv1D added +2.8pp across 71 folds. Temporal feature extraction matters far more than the physics-inspired dynamics layer.</p>
+      </div>
+      <div class="fcard fc2 fu">
+        <div class="fnum">02</div>
+        <h3>Ensemble Calibration Wins</h3>
+        <p>Probability-averaging XGBoost and Lagrangian conv1d achieves the best ECE (0.1210) and Brier (0.5899). The two models make complementary errors across fold types.</p>
+      </div>
+      <div class="fcard fc3 fu">
+        <div class="fnum">03</div>
+        <h3>Extra Features Hurt Neural Models</h3>
+        <p>29 econophysics features consistently degraded conv1d by ~2pp while XGBoost handled them fine. Neural encoders need curated, lower-noise inputs.</p>
+      </div>
+      <div class="fcard fc4 fu">
+        <div class="fnum">04</div>
+        <h3>Ablate One Axis at a Time</h3>
+        <p>Every combined experiment (conv1d + multi-horizon + econophysics) regressed. Isolated ablations were the only way to understand individual contributions.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- QUICK START ─────────────────────────────────────────────────────────── -->
+<section id="quickstart" class="section section-alt">
+  <div class="container">
+    <p class="eyebrow fu">Getting Started</p>
+    <h2 class="stitle fu">Quick Start</h2>
+    <p class="sdesc fu">
+      Clone the repo and run any baseline. Market data downloads automatically
+      via yfinance on the first run.
+    </p>
+
+    <div class="cblock fu">
+      <div class="cblock-hdr">
+        <div class="cd cd-r"></div>
+        <div class="cd cd-y"></div>
+        <div class="cd cd-g"></div>
+        <span class="clang">bash</span>
+      </div>
+      <pre><code><span class="cc"># 1. Create conda environment</span>
+<span class="ck">conda</span> create -n lagrange python=3.11 -y
+<span class="ck">conda</span> activate lagrange
+<span class="ck">pip</span> install -r requirements.txt
+
+<span class="cc"># 2. Run XGBoost baseline (auto-downloads SPY / QQQ / TLT / GLD / VIX)</span>
+<span class="ck">python</span> -m src.training.train_baseline
+
+<span class="cc"># 3. Lagrangian conv1d — subset first to verify, then full run</span>
+<span class="ck">python</span> -m src.training.train_lagrangian model=lagrangian_conv1d <span class="cf">+fold_start=20 +fold_end=40</span>
+<span class="ck">python</span> -m src.training.train_lagrangian model=lagrangian_conv1d
+
+<span class="cc"># 4. Compare all experiments</span>
+<span class="ck">python</span> scripts/compare_all.py <span class="cf">--fold-start 0 --fold-end 70 --require-complete-fold-range</span></code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER ──────────────────────────────────────────────────────────────── -->
+<footer>
+  <div class="footer-inner">
+    <div class="foot-logo">LLRN</div>
+    <div class="foot-links">
+      <a href="https://github.com/THAKKAR82/lagrangian-latent-regime-networks" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/THAKKAR82/lagrangian-latent-regime-networks/tree/master/results" target="_blank" rel="noopener">Results</a>
+      <a href="https://github.com/THAKKAR82/lagrangian-latent-regime-networks/tree/master/configs" target="_blank" rel="noopener">Configs</a>
+      <a href="https://github.com/THAKKAR82/lagrangian-latent-regime-networks/tree/master/docs" target="_blank" rel="noopener">Source</a>
+    </div>
+    <p class="foot-note">
+      Regime forecasting research · no profitability claims · data via yfinance
+    </p>
+  </div>
+</footer>
+
+<script>
+/* ── Canvas wave animation ──────────────────────────────────────────────── */
+(function () {
+  const canvas = document.getElementById('hero-canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, t = 0, raf;
+
+  /* one wave per regime, colour-matched */
+  const waves = [
+    { f: 0.0055, p: 0,              a: 0.10, rgb: [16, 185, 129],  y: 0.25 },
+    { f: 0.0085, p: Math.PI * 0.75, a: 0.13, rgb: [245, 158, 11],  y: 0.41 },
+    { f: 0.0048, p: Math.PI * 1.55, a: 0.09, rgb: [239, 68, 68],   y: 0.58 },
+    { f: 0.0072, p: Math.PI * 2.30, a: 0.12, rgb: [139, 92, 246],  y: 0.74 },
+  ];
+
+  function resize() {
+    W = canvas.width  = canvas.offsetWidth;
+    H = canvas.height = canvas.offsetHeight;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#07090F';
+    ctx.fillRect(0, 0, W, H);
+
+    waves.forEach(w => {
+      const [r, g, b] = w.rgb;
+      ctx.beginPath();
+
+      for (let x = 0; x <= W; x += 4) {
+        const y = H * w.y
+          + Math.sin(x * w.f + t * 0.22 + w.p) * H * w.a
+          + Math.sin(x * w.f * 1.8 + t * 0.10 + w.p * 0.45) * H * w.a * 0.36;
+        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+
+      ctx.strokeStyle = `rgba(${r},${g},${b},0.20)`;
+      ctx.lineWidth   = 1.6;
+      ctx.stroke();
+
+      ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+      ctx.fillStyle = `rgba(${r},${g},${b},0.028)`;
+      ctx.fill();
+    });
+
+    t += 0.016;
+    raf = requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', resize);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) cancelAnimationFrame(raf);
+    else { t += 0; draw(); }
+  });
+
+  resize();
+  draw();
+}());
+
+/* ── Scroll fade-in ─────────────────────────────────────────────────────── */
+(function () {
+  /* stagger siblings within each section */
+  document.querySelectorAll('.section, .hero').forEach(sec => {
+    sec.querySelectorAll('.fu').forEach((el, i) => {
+      el.style.transitionDelay = `${i * 0.09}s`;
+    });
+  });
+
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('vis');
+        io.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.07, rootMargin: '0px 0px -50px 0px' });
+
+  document.querySelectorAll('.fu').forEach(el => io.observe(el));
+}());
+</script>
+
+</body>
+</html>
