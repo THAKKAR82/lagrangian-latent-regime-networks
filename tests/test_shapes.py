@@ -768,6 +768,167 @@ def test_prediction_artifact_to_dataframe_columns():
     assert required_cols.issubset(set(df.columns))
 
 
+def test_prediction_artifact_non_standard_size(tmp_path):
+    """Artifact with 213 samples (252 - window_len + 1) must round-trip cleanly."""
+    rng = np.random.default_rng(7)
+    n = 213
+    probs = np.abs(rng.standard_normal((n, 4))).astype(np.float32)
+    probs /= probs.sum(axis=1, keepdims=True)
+    labels = rng.integers(0, 4, n)
+    dates = np.array([f"2020-{(i // 31) + 1:02d}-{(i % 28) + 1:02d}" for i in range(n)])
+    art = PredictionArtifact(
+        fold_id=20, split="test", model_name="xgb",
+        dates=dates, true_labels=labels, probs=probs,
+    )
+    path = tmp_path / "fold_20_test.parquet"
+    art.save(path)
+    loaded = PredictionArtifact.load(path)
+    assert len(loaded.probs) == n
+    assert len(loaded.true_labels) == n
+    assert len(loaded.dates) == n
+
+
+def test_prediction_artifact_lagrangian_val_alignment(tmp_path):
+    """val_dates (252 raw) sliced to last n_val (213 windowed) must produce valid artifact."""
+    rng = np.random.default_rng(9)
+    window_len = 40
+    period = 252
+    n_val = period - window_len + 1  # 213
+
+    raw_val_dates = pd.date_range("2020-01-02", periods=period, freq="B")
+    aligned_dates = np.array([str(d.date()) for d in raw_val_dates[-n_val:]])
+
+    probs = np.abs(rng.standard_normal((n_val, 4))).astype(np.float32)
+    probs /= probs.sum(axis=1, keepdims=True)
+    labels = rng.integers(0, 4, n_val)
+
+    art = PredictionArtifact(
+        fold_id=20, split="val", model_name="lagrangian_conv1d",
+        dates=aligned_dates, true_labels=labels, probs=probs,
+    )
+    path = tmp_path / "fold_20_val.parquet"
+    art.save(path)
+    loaded = PredictionArtifact.load(path)
+    assert len(loaded.dates) == n_val
+    assert len(loaded.true_labels) == n_val
+    assert len(loaded.probs) == n_val
+    # The dates should be the LAST n_val dates of the period, not the first
+    assert loaded.dates[0] == str(raw_val_dates[window_len - 1].date())
+
+
+def test_prediction_artifact_mismatched_lengths_raises():
+    """to_dataframe() must raise ValueError with a clear message on length mismatch."""
+    rng = np.random.default_rng(8)
+    probs = np.abs(rng.standard_normal((213, 4))).astype(np.float32)
+    probs /= probs.sum(axis=1, keepdims=True)
+    art = PredictionArtifact(
+        fold_id=5, split="test", model_name="xgb",
+        dates=np.array(["2020-01-01"] * 252),   # 252 dates — wrong length
+        true_labels=rng.integers(0, 4, 213),      # 213 labels — matches probs
+        probs=probs,                              # 213 rows
+    )
+    with pytest.raises(ValueError, match="length mismatch"):
+        art.to_dataframe()
+
+
+def test_fold_filter_baseline_skips_early_folds():
+    """build_folds with fold_start=20 must not yield folds below 20."""
+    from src.utils.dataset_builder import SplitConfig, build_folds
+    import pandas as pd
+
+    # Minimal synthetic data: 252*3 + 504 trading days
+    n = 2500
+    idx = pd.date_range("2000-01-01", periods=n, freq="B")
+    features = pd.DataFrame(np.random.randn(n, 5).astype(np.float32), index=idx)
+    labels = pd.Series(np.random.randint(0, 4, n).astype(float), index=idx)
+
+    cfg = SplitConfig(val_size=30, test_size=30, step_size=10, min_train_size=60)
+    fold_start, fold_end = 5, 8
+    seen = []
+    for fold in build_folds(features, labels, cfg, window_len=5, flat=True):
+        if fold.fold_id < fold_start:
+            continue
+        if fold.fold_id > fold_end:
+            break
+        seen.append(fold.fold_id)
+
+    assert all(f >= fold_start for f in seen), f"Got folds below {fold_start}: {seen}"
+    assert all(f <= fold_end for f in seen), f"Got folds above {fold_end}: {seen}"
+    assert len(seen) > 0, "Expected at least one fold in range"
+
+
+# ---------------------------------------------------------------------------
+# train_stacked lag model name resolution tests
+# ---------------------------------------------------------------------------
+
+from src.training.train_stacked import _lag_model_name
+from omegaconf import OmegaConf
+
+
+def test_stacked_lag_model_name_default_xgb_falls_back():
+    """Default config (model.name=xgb) must resolve to 'lagrangian'."""
+    cfg = OmegaConf.create({"model": {"name": "xgb"}})
+    assert _lag_model_name(cfg) == "lagrangian"
+
+
+def test_stacked_lag_model_name_lagrangian_v6():
+    """model=lagrangian_v6 must resolve to 'lagrangian_v6'."""
+    cfg = OmegaConf.create({"model": {"name": "lagrangian_v6"}})
+    assert _lag_model_name(cfg) == "lagrangian_v6"
+
+
+def test_stacked_lag_model_name_pure_lagrangian():
+    """model=pure_lagrangian must resolve to 'pure_lagrangian'."""
+    cfg = OmegaConf.create({"model": {"name": "pure_lagrangian"}})
+    assert _lag_model_name(cfg) == "pure_lagrangian"
+
+
+def test_stacked_lag_model_name_baseline_variants_fall_back():
+    """All baseline names must fall back to 'lagrangian'."""
+    for name in ("lstm", "gru", "node", "stacked"):
+        cfg = OmegaConf.create({"model": {"name": name}})
+        assert _lag_model_name(cfg) == "lagrangian", f"Expected 'lagrangian' for model.name='{name}'"
+
+
+def test_stacked_experiment_name_includes_lag_model():
+    """Experiment name must encode the lag model."""
+    cfg = OmegaConf.create({"model": {"name": "lagrangian_v6"}})
+    lag = _lag_model_name(cfg)
+    assert f"stacker_logreg_xgb_{lag}" == "stacker_logreg_xgb_lagrangian_v6"
+
+
+def test_stacked_loads_artifacts_from_named_dir(tmp_path):
+    """Stacker must load lag artifacts from predictions/<lag_model>/."""
+    from src.postprocessing.stacker import LogisticStacker
+
+    rng = np.random.default_rng(42)
+    n = 50
+
+    def _make_artifact(model_name):
+        probs = np.abs(rng.standard_normal((n, 4))).astype(np.float32)
+        probs /= probs.sum(axis=1, keepdims=True)
+        return PredictionArtifact(
+            fold_id=20, split="test", model_name=model_name,
+            dates=np.array([f"2020-01-{i+1:02d}" for i in range(n)]),
+            true_labels=rng.integers(0, 4, n),
+            probs=probs,
+        )
+
+    xgb_dir = tmp_path / "predictions" / "xgb"
+    lag_dir = tmp_path / "predictions" / "lagrangian_v6"
+    xgb_dir.mkdir(parents=True)
+    lag_dir.mkdir(parents=True)
+
+    _make_artifact("xgb").save(xgb_dir / "fold_20_test.parquet")
+    _make_artifact("lagrangian_v6").save(lag_dir / "fold_20_test.parquet")
+
+    xgb_art = PredictionArtifact.load(xgb_dir / "fold_20_test.parquet")
+    lag_art = PredictionArtifact.load(lag_dir / "fold_20_test.parquet")
+    assert xgb_art.model_name == "xgb"
+    assert lag_art.model_name == "lagrangian_v6"
+    assert len(lag_art.probs) == n
+
+
 # ---------------------------------------------------------------------------
 # Temperature Scaling tests
 # ---------------------------------------------------------------------------
@@ -1067,6 +1228,44 @@ def test_multiscale_default_off():
     assert not cfg.use_multi_timescale
 
 
+# --- scalar damping ablation tests ---
+
+def test_scalar_damping_disabled_no_raw_gamma():
+    """use_scalar_damping=False must not register raw_gamma and forward must still work."""
+    cfg = LagrangianConfig(
+        input_dim=37, window_len=40, latent_dim=8, hidden_dim=32, n_steps=2,
+        use_scalar_damping=False, use_vector_damping=False,
+    )
+    model = LagrangianRegimeNet(cfg)
+    assert not hasattr(model, 'raw_gamma'), "raw_gamma must not exist when use_scalar_damping=False"
+    x = torch.randn(4, 40, 37)
+    out = model(x)
+    assert out.shape == (4, 4)
+    assert torch.isfinite(out).all()
+
+
+@pytest.mark.parametrize("use_scalar,use_vector,use_forcing", [
+    (False, False, False),  # pure_lagrangian
+    (True,  False, False),  # scalar_damped_lagrangian
+    (False, True,  False),  # vector_damped_lagrangian
+    (False, False, True),   # forced_lagrangian
+    (True,  False, True),   # forced_scalar_damped_lagrangian
+    (False, True,  True),   # forced_vector_damped_lagrangian
+])
+def test_ablation_configs_forward(use_scalar, use_vector, use_forcing):
+    cfg = LagrangianConfig(
+        input_dim=37, window_len=40, latent_dim=8, hidden_dim=32, n_steps=2,
+        use_scalar_damping=use_scalar,
+        use_vector_damping=use_vector,
+        use_forcing=use_forcing,
+    )
+    model = LagrangianRegimeNet(cfg)
+    x = torch.randn(4, 40, 37)
+    out = model(x)
+    assert out.shape == (4, 4), f"Expected (4,4), got {out.shape}"
+    assert torch.isfinite(out).all(), "Non-finite logits in ablation config"
+
+
 # Postprocessing pipeline smoke test (Task 14)
 from src.postprocessing.temperature import TemperatureScaler
 from src.postprocessing.ensemble import WeightedEnsemble
@@ -1124,3 +1323,99 @@ def test_postprocessing_pipeline_smoke():
         val_acc_xgb = float((xgb_val.argmax(axis=1) == y_val).mean())
         val_acc_lag = float((lag_val.argmax(axis=1) == y_val).mean())
         adaptive.register_fold_val_f1(xgb_f1=val_acc_xgb, lag_f1=val_acc_lag)
+
+
+# ---------------------------------------------------------------------------
+# Model selector tests
+# ---------------------------------------------------------------------------
+from src.evaluation.model_selector import ModelSelector, compute_val_metrics, METHODS
+
+
+def _make_probs(rng, n: int) -> np.ndarray:
+    p = np.abs(rng.standard_normal((n, 4))).astype(np.float32)
+    p /= p.sum(axis=1, keepdims=True)
+    return p
+
+
+def test_compute_val_metrics_keys_and_range():
+    rng = np.random.default_rng(0)
+    probs = _make_probs(rng, 50)
+    labels = rng.integers(0, 4, 50)
+    m = compute_val_metrics(labels, probs)
+    assert set(m) == {"macro_f1", "ece"}
+    assert 0.0 <= m["macro_f1"] <= 1.0
+    assert 0.0 <= m["ece"] <= 1.0
+
+
+def test_model_selector_unknown_method_raises():
+    with pytest.raises(ValueError, match="Unknown method"):
+        ModelSelector(models=["a", "b"], method="invalid_method")
+
+
+def test_model_selector_fallback_when_no_history():
+    sel = ModelSelector(models=["xgb", "ensemble"], method="previous_best_macro_f1", fallback="ensemble")
+    chosen, scores = sel.select()
+    assert chosen == "ensemble"
+    assert all(np.isnan(v) for v in scores.values())
+
+
+def test_model_selector_previous_best_picks_better_model():
+    sel = ModelSelector(models=["a", "b"], method="previous_best_macro_f1", fallback="a")
+    sel.record_val("a", {"macro_f1": 0.30, "ece": 0.10})
+    sel.record_val("b", {"macro_f1": 0.45, "ece": 0.15})
+    chosen, scores = sel.select()
+    assert chosen == "b"
+    assert abs(scores["a"] - 0.30) < 1e-6
+    assert abs(scores["b"] - 0.45) < 1e-6
+
+
+def test_model_selector_rolling_uses_last_k():
+    # model_a was historically good but recently bad; rolling_k=2 should prefer b
+    sel = ModelSelector(models=["a", "b"], method="rolling_best_macro_f1", k=2, fallback="a")
+    # old history (will be outside k=2 window after recording 3 items for a)
+    for _ in range(3):
+        sel.record_val("a", {"macro_f1": 0.60, "ece": 0.05})
+    # recent history: a is bad, b is good
+    sel.record_val("a", {"macro_f1": 0.20, "ece": 0.20})
+    sel.record_val("a", {"macro_f1": 0.20, "ece": 0.20})
+    sel.record_val("b", {"macro_f1": 0.50, "ece": 0.10})
+    sel.record_val("b", {"macro_f1": 0.50, "ece": 0.10})
+    chosen, _ = sel.select()
+    assert chosen == "b", "Rolling selector should favour recent performance"
+
+
+def test_model_selector_calibrated_penalizes_high_ece():
+    alpha = 1.0
+    sel = ModelSelector(models=["a", "b"], method="previous_best_calibrated_score", alpha=alpha, fallback="a")
+    # a has higher raw f1 but very high ECE
+    sel.record_val("a", {"macro_f1": 0.50, "ece": 0.40})  # calibrated = 0.50 - 1.0*0.40 = 0.10
+    # b has lower f1 but low ECE
+    sel.record_val("b", {"macro_f1": 0.40, "ece": 0.05})  # calibrated = 0.40 - 1.0*0.05 = 0.35
+    chosen, _ = sel.select()
+    assert chosen == "b", "Calibrated selector should prefer lower-ECE model"
+
+
+def test_model_selector_fallback_static_always_returns_fallback():
+    sel = ModelSelector(models=["a", "b"], method="fallback_static", fallback="b")
+    # Even with history for "a", should always return "b"
+    sel.record_val("a", {"macro_f1": 0.99, "ece": 0.01})
+    for _ in range(5):
+        chosen, scores = sel.select()
+        assert chosen == "b"
+        assert all(np.isnan(v) for v in scores.values())
+        sel.record_val("a", {"macro_f1": 0.99, "ece": 0.01})
+
+
+def test_model_selector_record_increments_history():
+    sel = ModelSelector(models=["a", "b"], method="previous_best_macro_f1", fallback="a")
+    assert sel.history_lengths() == {"a": 0, "b": 0}
+    sel.record_val("a", {"macro_f1": 0.4, "ece": 0.1})
+    sel.record_val("a", {"macro_f1": 0.4, "ece": 0.1})
+    sel.record_val("b", {"macro_f1": 0.5, "ece": 0.1})
+    assert sel.history_lengths() == {"a": 2, "b": 1}
+
+
+def test_model_selector_unknown_model_record_ignored():
+    sel = ModelSelector(models=["a"], method="previous_best_macro_f1", fallback="a")
+    sel.record_val("nonexistent", {"macro_f1": 0.9, "ece": 0.0})
+    assert sel.history_lengths() == {"a": 0}

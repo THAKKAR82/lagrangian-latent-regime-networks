@@ -212,6 +212,7 @@ def main(cfg: DictConfig) -> None:
         damping=cfg.model.damping,
         dt=cfg.model.dt,
         use_forcing=cfg.model.use_forcing,
+        use_scalar_damping=getattr(cfg.model, 'use_scalar_damping', True),
         use_vector_damping=getattr(cfg.model, 'use_vector_damping', False),
         use_coord_transform=getattr(cfg.model, 'use_coord_transform', False),
         eps=cfg.model.eps,
@@ -234,11 +235,16 @@ def main(cfg: DictConfig) -> None:
         coarse_dt=getattr(cfg.model, 'coarse_dt', 5.0),
     )
 
-    output_dir = Path(".")
-    figures_dir = project_root / cfg.figures_dir / MODEL_NAME
+    experiment_name = getattr(cfg.model, "name", MODEL_NAME)
 
-    artifact_dir = project_root / "predictions" / MODEL_NAME
+    output_dir = Path(".")
+    figures_dir = project_root / cfg.figures_dir / experiment_name
+
+    artifact_dir = project_root / "predictions" / experiment_name
     artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    import datetime
+    run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     loss_type = getattr(cfg.model, "loss_type", "ce")
 
@@ -280,23 +286,29 @@ def main(cfg: DictConfig) -> None:
         val_prob = model.predict_proba(fold.val_X)
         result = evaluate(fold.test_y, y_pred, y_prob)
 
-        # Save val and test artifacts
-        n = len(y_pred)
-        test_dates_aligned = fold.test_dates[len(fold.test_dates) - n:]
+        # Save val and test artifacts.
+        # fold.val_dates / fold.test_dates are the raw 252-day periods; windowing
+        # reduces predictions to (period - window_len + 1) rows, so we align to tail.
+        n_val = len(val_prob)
+        n_test = len(y_prob)
         PredictionArtifact(
-            fold_id=fold.fold_id, split="val", model_name=MODEL_NAME,
-            dates=np.array([str(d.date()) for d in fold.val_dates]),
+            fold_id=fold.fold_id, split="val", model_name=experiment_name,
+            dates=np.array([str(d.date()) for d in fold.val_dates[-n_val:]]),
             true_labels=fold.val_y, probs=val_prob,
         ).save(artifact_dir / f"fold_{fold.fold_id:02d}_val.parquet")
         PredictionArtifact(
-            fold_id=fold.fold_id, split="test", model_name=MODEL_NAME,
-            dates=np.array([str(d.date()) for d in test_dates_aligned]),
-            true_labels=fold.test_y[:n], probs=y_prob,
+            fold_id=fold.fold_id, split="test", model_name=experiment_name,
+            dates=np.array([str(d.date()) for d in fold.test_dates[-n_test:]]),
+            true_labels=fold.test_y, probs=y_prob,
         ).save(artifact_dir / f"fold_{fold.fold_id:02d}_test.parquet")
+        n = n_test  # used below for plot date alignment
 
         metrics_dict = {
             "fold_id": fold.fold_id,
-            "model": MODEL_NAME,
+            "model": experiment_name,
+            "fold_start": fold_start,
+            "fold_end": fold_end,
+            "run_id": run_id,
             "macro_f1": result.macro_f1,
             "balanced_accuracy": result.balanced_accuracy,
             "brier_score": result.brier_score,
@@ -315,11 +327,11 @@ def main(cfg: DictConfig) -> None:
         (fold_dir / "metrics.json").write_text(json.dumps(metrics_dict, indent=2))
 
         plot_regime_timeline(
-            test_dates_aligned, fold.test_y[:n], y_pred,
+            fold.test_dates[-n:], fold.test_y, y_pred,
             figures_dir / f"fold_{fold.fold_id:02d}_timeline.png",
         )
         plot_confusion_matrix(
-            result.confusion_matrix, f"Fold {fold.fold_id} (lagrangian)",
+            result.confusion_matrix, f"Fold {fold.fold_id} ({experiment_name})",
             figures_dir / f"fold_{fold.fold_id:02d}_cm.png",
         )
 
@@ -334,11 +346,13 @@ def main(cfg: DictConfig) -> None:
         return
 
     summary_df = pd.DataFrame(all_metrics)
-    summary_df.to_csv(output_dir / "walk_forward_summary.csv", index=False)
+    csv_path = output_dir / f"walk_forward_summary_{experiment_name}.csv"
+    summary_df.to_csv(csv_path, index=False)
+    log.info(f"Saved summary to {csv_path}")
 
     numeric_cols = ["macro_f1", "balanced_accuracy", "brier_score", "ece"]
     summary_stats = summary_df[numeric_cols].agg(["mean", "std"])
-    log.info(f"\nWalk-Forward Summary (lagrangian):\n{summary_stats.to_string()}")
+    log.info(f"\nWalk-Forward Summary ({experiment_name}):\n{summary_stats.to_string()}")
 
     plot_fold_summary(
         all_fold_ids, summary_df["macro_f1"].tolist(),

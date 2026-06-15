@@ -32,6 +32,7 @@ class LagrangianConfig:
     damping: float = 0.1
     dt: float = 1.0
     use_forcing: bool = False
+    use_scalar_damping: bool = True
     use_vector_damping: bool = False
     use_coord_transform: bool = False
     eps: float = 1e-4
@@ -301,9 +302,10 @@ class LagrangianRegimeNet(nn.Module):
             nn.init.zeros_(self.gamma_net.weight)
             nn.init.constant_(self.gamma_net.bias, _softplus_inverse(cfg.damping))
 
-        self.raw_gamma = nn.Parameter(
-            torch.tensor(_softplus_inverse(cfg.damping))
-        )
+        if cfg.use_scalar_damping:
+            self.raw_gamma = nn.Parameter(
+                torch.tensor(_softplus_inverse(cfg.damping))
+            )
 
         if cfg.use_forcing:
             self.forcing_proj = nn.Linear(cfg.input_dim, cfg.latent_dim)
@@ -355,9 +357,11 @@ class LagrangianRegimeNet(nn.Module):
             if self.cfg.use_vector_damping:
                 gamma_vec = F.softplus(self.gamma_net(q))
                 z_ddot = -(dV_dq + gamma_vec * z_dot) / M_diag
-            else:
+            elif self.cfg.use_scalar_damping:
                 gamma = F.softplus(self.raw_gamma)
                 z_ddot = -(dV_dq + gamma * z_dot) / M_diag
+            else:
+                z_ddot = -dV_dq / M_diag
             if self.cfg.use_forcing:
                 z_ddot = z_ddot + self.forcing_proj(x[:, -1, :])
             z_dot = z_dot + dt * z_ddot
@@ -417,9 +421,11 @@ class LagrangianRegimeNet(nn.Module):
             if self.cfg.use_vector_damping:
                 gamma_vec = F.softplus(self.gamma_net(q))
                 z_ddot = -(dV_dq + gamma_vec * z_dot) / M_diag
-            else:
+            elif self.cfg.use_scalar_damping:
                 gamma = F.softplus(self.raw_gamma)
                 z_ddot = -(dV_dq + gamma * z_dot) / M_diag
+            else:
+                z_ddot = -dV_dq / M_diag
             if self.cfg.use_forcing:
                 z_ddot = z_ddot + self.forcing_proj(x[:, -1, :])
             z_dot = z_dot + dt * z_ddot

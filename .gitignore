@@ -1,14 +1,33 @@
+# --- generated data & artifacts ---
 data/
+predictions/
 outputs/
 multirun/
-__pycache__/
-*.pyc
-.hydra/
-*.egg-info/
-dist/
-.env
-*.parquet
+
+# --- per-fold hydra outputs at root ---
+fold_*/
+
+# --- figures: keep fold_summary.png only ---
+reports/figures/**/*_cm.png
+reports/figures/**/*_timeline.png
 reports/figures/*.png
 reports/figures/*.html
-fold_*/
+
+# --- log files ---
+*.log
+
+# --- python ---
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+
+# --- environment ---
+.env
+.hydra/
+
+# --- internal planning docs ---
+docs/superpowers/
+
+# --- legacy unlabelled summary CSV ---
 walk_forward_summary.csv

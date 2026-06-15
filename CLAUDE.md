@@ -170,11 +170,50 @@ No model config required — uses hardcoded `_LAG_CFG` and `_XGB_CFG` dicts matc
 
 ## Tests
 
-121 tests in `tests/test_shapes.py`. Must stay green before any commit.
+138 tests in `tests/test_shapes.py`. Must stay green before any commit.
 
-Key test groups: XGBoost, LSTM/GRU, NODE, Lagrangian base, v5 (vector damping), v6 MH model, econophysics features, multi-horizon labels, encoder ablation (4 variants × 7 tests + 3 standalone), skip connection (5 tests).
+Key test groups: XGBoost, LSTM/GRU, NODE, Lagrangian base, v5 (vector damping), v6 MH model, econophysics features, multi-horizon labels, encoder ablation (4 variants × 7 tests + 3 standalone), skip connection (5 tests), scalar damping ablation (7 tests).
 
 ```bash
 python -m pytest tests/test_shapes.py -v        # full suite
 python -m pytest tests/test_shapes.py -k "skip_connection"  # skip connection tests only
 ```
+
+## Result naming and comparison
+
+Every training run saves a CSV named `walk_forward_summary_{experiment_name}.csv` in the project root. Each row contains `fold_id`, `model`, `fold_start`, `fold_end`, `run_id`.
+
+**Experiment names:**
+
+| Trainer | Condition | Name saved |
+|---------|-----------|------------|
+| `train_baseline` | always | `xgb` |
+| `train_rnn` | lstm config | `lstm` |
+| `train_rnn` | gru config | `gru` |
+| `train_node` | always | `node` |
+| `train_lagrangian` | any model config | `cfg.model.name` (e.g., `lagrangian_conv1d`, `pure_lagrangian`) |
+| `train_ensemble` | `ensemble_grid_search=false` | `ensemble_fixed_50_50` |
+| `train_ensemble` | `ensemble_grid_search=true` | `ensemble_weighted_grid` |
+
+**Comparing results:**
+
+```bash
+# All models, all folds
+python scripts/compare_all.py
+
+# Filter to folds 20–40 (any model that has at least one fold in range)
+python scripts/compare_all.py --fold-start 20 --fold-end 40
+
+# Only models that have ALL folds 20–40 (apples-to-apples comparison)
+python scripts/compare_all.py --fold-start 20 --fold-end 40 --require-complete-fold-range
+
+# Full 71-fold comparison
+python scripts/compare_all.py --fold-start 0 --fold-end 70 --require-complete-fold-range
+```
+
+Output tables are saved automatically to `outputs/comparisons/`.
+
+**Old files to be aware of:**
+- `walk_forward_summary_ensemble.csv` — old 71-fold fixed-50/50 ensemble result, model name `ensemble`
+- `walk_forward_summary_lagrangian_v1/v2/v3/v4.csv` — old model name `lagrangian` (generic). These appear in `compare_all.py` merged under the `lagrangian` row.
+- `walk_forward_summary.csv` (no suffix) — NOT picked up by compare_all.py. The grid-search folds-20-40 result has been rescued to `walk_forward_summary_ensemble_weighted_grid.csv`.

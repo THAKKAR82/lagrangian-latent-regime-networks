@@ -18,6 +18,20 @@ class PredictionArtifact:
     probs: np.ndarray   # shape (N, 4), float32
 
     def to_dataframe(self) -> pd.DataFrame:
+        n = len(self.probs)
+        lengths = {
+            "dates": len(self.dates),
+            "true_labels": len(self.true_labels),
+            "probs": n,
+        }
+        bad = {k: v for k, v in lengths.items() if v != n}
+        if bad:
+            raise ValueError(
+                f"PredictionArtifact length mismatch "
+                f"(fold={self.fold_id}, split={self.split}): "
+                f"probs has {n} rows but "
+                + ", ".join(f"{k}={v}" for k, v in bad.items())
+            )
         df = pd.DataFrame({
             "date": self.dates,
             "fold_id": self.fold_id,

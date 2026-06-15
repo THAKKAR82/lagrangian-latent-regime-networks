@@ -165,6 +165,11 @@ def main(cfg: DictConfig) -> None:
         solver=cfg.model.solver,
     )
 
+    import datetime
+    run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    fold_start = getattr(cfg, 'fold_start', None)
+    fold_end = getattr(cfg, 'fold_end', None)
+
     output_dir = Path(".")
     figures_dir = project_root / cfg.figures_dir / MODEL_NAME
 
@@ -178,6 +183,11 @@ def main(cfg: DictConfig) -> None:
         window_len=cfg.data.window_len,
         flat=False,
     ):
+        if fold_start is not None and fold.fold_id < fold_start:
+            continue
+        if fold_end is not None and fold.fold_id > fold_end:
+            break
+
         log.info(
             f"Fold {fold.fold_id}: "
             f"train={len(fold.train_y)} val={len(fold.val_y)} test={len(fold.test_y)}"
@@ -194,6 +204,9 @@ def main(cfg: DictConfig) -> None:
         metrics_dict = {
             "fold_id": fold.fold_id,
             "model": MODEL_NAME,
+            "fold_start": fold_start,
+            "fold_end": fold_end,
+            "run_id": run_id,
             "macro_f1": result.macro_f1,
             "balanced_accuracy": result.balanced_accuracy,
             "brier_score": result.brier_score,
@@ -234,11 +247,13 @@ def main(cfg: DictConfig) -> None:
         return
 
     summary_df = pd.DataFrame(all_metrics)
-    summary_df.to_csv(output_dir / "walk_forward_summary.csv", index=False)
+    csv_path = output_dir / f"walk_forward_summary_{MODEL_NAME}.csv"
+    summary_df.to_csv(csv_path, index=False)
+    log.info(f"Saved summary to {csv_path}")
 
     numeric_cols = ["macro_f1", "balanced_accuracy", "brier_score", "ece"]
     summary_stats = summary_df[numeric_cols].agg(["mean", "std"])
-    log.info(f"\nWalk-Forward Summary (node):\n{summary_stats.to_string()}")
+    log.info(f"\nWalk-Forward Summary ({MODEL_NAME}):\n{summary_stats.to_string()}")
 
     plot_fold_summary(
         all_fold_ids, summary_df["macro_f1"].tolist(),

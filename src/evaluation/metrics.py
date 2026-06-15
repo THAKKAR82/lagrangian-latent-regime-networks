@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from sklearn.metrics import (
-    balanced_accuracy_score,
     confusion_matrix,
     f1_score,
 )
@@ -58,17 +57,27 @@ def _mean_entropy(y_prob: np.ndarray) -> float:
     return float(-np.sum(y_prob * np.log(y_prob + eps), axis=1).mean())
 
 
+_LABELS = [0, 1, 2, 3]
+
+
+def _balanced_accuracy(cm: np.ndarray) -> float:
+    """Balanced accuracy from a 4x4 confusion matrix with fixed label order."""
+    per_class = cm.diagonal() / cm.sum(axis=1).clip(1)
+    return float(per_class.mean())
+
+
 def evaluate(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     y_prob: np.ndarray,
 ) -> EvalResult:
     """Compute all regime forecasting metrics."""
-    class_f1 = f1_score(y_true, y_pred, average=None, zero_division=0, labels=[0, 1, 2, 3])
+    class_f1 = f1_score(y_true, y_pred, average=None, zero_division=0, labels=_LABELS)
+    cm = confusion_matrix(y_true, y_pred, labels=_LABELS)
     return EvalResult(
-        macro_f1=float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
-        balanced_accuracy=float(balanced_accuracy_score(y_true, y_pred)),
-        confusion_matrix=confusion_matrix(y_true, y_pred),
+        macro_f1=float(f1_score(y_true, y_pred, average="macro", zero_division=0, labels=_LABELS)),
+        balanced_accuracy=_balanced_accuracy(cm),
+        confusion_matrix=cm,
         brier_score=_brier_score(y_true, y_prob),
         ece=_ece(y_true, y_prob),
         switch_frequency=_switch_frequency(y_pred),

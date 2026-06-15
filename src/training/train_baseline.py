@@ -114,7 +114,12 @@ def main(cfg: DictConfig) -> None:
         n_jobs=cfg.model.n_jobs,
     )
 
-    output_dir = Path(".")  # Hydra sets CWD to output dir
+    import datetime
+    run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    fold_start = getattr(cfg, 'fold_start', None)
+    fold_end = getattr(cfg, 'fold_end', None)
+
+    output_dir = Path(".")
     figures_dir = project_root / cfg.figures_dir
 
     artifact_dir = project_root / "predictions" / MODEL_NAME
@@ -139,6 +144,11 @@ def main(cfg: DictConfig) -> None:
         window_len=cfg.data.window_len,
         flat=True,
     ):
+        if fold_start is not None and fold.fold_id < fold_start:
+            continue
+        if fold_end is not None and fold.fold_id > fold_end:
+            break
+
         log.info(
             f"Fold {fold.fold_id}: "
             f"train={len(fold.train_y)} val={len(fold.val_y)} test={len(fold.test_y)}"
@@ -151,20 +161,27 @@ def main(cfg: DictConfig) -> None:
         y_prob = model.predict_proba(fold.test_X)
         result = evaluate(fold.test_y, y_pred, y_prob)
 
+        # Windowing reduces test/val by (window_len - 1) rows; align dates to last n.
         val_prob = model.predict_proba(fold.val_X)
+        n_val = len(val_prob)
+        n_test = len(y_prob)
         PredictionArtifact(
             fold_id=fold.fold_id, split="val", model_name=MODEL_NAME,
-            dates=np.array([str(d.date()) for d in fold.val_dates]),
+            dates=np.array([str(d.date()) for d in fold.val_dates[-n_val:]]),
             true_labels=fold.val_y, probs=val_prob,
         ).save(artifact_dir / f"fold_{fold.fold_id:02d}_val.parquet")
         PredictionArtifact(
             fold_id=fold.fold_id, split="test", model_name=MODEL_NAME,
-            dates=np.array([str(d.date()) for d in fold.test_dates]),
+            dates=np.array([str(d.date()) for d in fold.test_dates[-n_test:]]),
             true_labels=fold.test_y, probs=y_prob,
         ).save(artifact_dir / f"fold_{fold.fold_id:02d}_test.parquet")
 
         metrics_dict = {
             "fold_id": fold.fold_id,
+            "model": MODEL_NAME,
+            "fold_start": fold_start,
+            "fold_end": fold_end,
+            "run_id": run_id,
             "macro_f1": result.macro_f1,
             "balanced_accuracy": result.balanced_accuracy,
             "brier_score": result.brier_score,
@@ -207,11 +224,13 @@ def main(cfg: DictConfig) -> None:
 
     # --- Aggregate ---
     summary_df = pd.DataFrame(all_metrics)
-    summary_df.to_csv(output_dir / "walk_forward_summary.csv", index=False)
+    csv_path = output_dir / f"walk_forward_summary_{MODEL_NAME}.csv"
+    summary_df.to_csv(csv_path, index=False)
+    log.info(f"Saved summary to {csv_path}")
 
     numeric_cols = ["macro_f1", "balanced_accuracy", "brier_score", "ece"]
     summary_stats = summary_df[numeric_cols].agg(["mean", "std"])
-    log.info(f"\nWalk-Forward Summary:\n{summary_stats.to_string()}")
+    log.info(f"\nWalk-Forward Summary ({MODEL_NAME}):\n{summary_stats.to_string()}")
 
     mean_importance = np.mean(all_importances, axis=0)
     plot_feature_importance(

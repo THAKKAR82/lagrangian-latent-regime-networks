@@ -41,7 +41,7 @@ from src.visualization.plots import (
 
 log = logging.getLogger(__name__)
 
-MODEL_NAME = "ensemble"
+MODEL_NAME = "ensemble"  # overridden at runtime based on mode
 
 _LAG_CFG = dict(
     latent_dim=16, hidden_dim=64, encoder_type="conv1d", encoder_dim=64,
@@ -151,10 +151,13 @@ def main(cfg: DictConfig) -> None:
     folds_flat = list(build_folds(features, labels, split_cfg, window_len=1, flat=True))
     folds_seq  = list(build_folds(features, labels, split_cfg, window_len=40, flat=False))
 
-    output_dir = Path(".")
-    figures_dir = project_root / cfg.figures_dir / MODEL_NAME
+    use_grid_search = getattr(cfg, "ensemble_grid_search", False)
+    experiment_name = "ensemble_weighted_grid" if use_grid_search else "ensemble_fixed_50_50"
 
-    artifact_dir = project_root / "predictions" / MODEL_NAME
+    output_dir = Path(".")
+    figures_dir = project_root / cfg.figures_dir / experiment_name
+
+    artifact_dir = project_root / "predictions" / experiment_name
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     all_metrics: list[dict] = []
@@ -162,6 +165,9 @@ def main(cfg: DictConfig) -> None:
 
     fold_start = getattr(cfg, "fold_start", None)
     fold_end   = getattr(cfg, "fold_end", None)
+
+    import datetime
+    run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     xgb_cfg = XGBConfig(seed=cfg.seed, **_XGB_CFG)
 
@@ -192,7 +198,6 @@ def main(cfg: DictConfig) -> None:
         y_true = fold_f.test_y[-n:]
 
         # Weighted ensemble with optional grid search
-        use_grid_search = getattr(cfg, "ensemble_grid_search", False)
         if use_grid_search:
             xgb_val_prob_ens = xgb.predict_proba(fold_f.val_X)
             lag_val_prob_ens = lag.predict_proba(fold_s.val_X)
@@ -218,19 +223,25 @@ def main(cfg: DictConfig) -> None:
         val_dates_aligned = fold_f.val_dates[-n_val:]
 
         PredictionArtifact(
-            fold_id=fold_f.fold_id, split="val", model_name=MODEL_NAME,
+            fold_id=fold_f.fold_id, split="val", model_name=experiment_name,
             dates=np.array([str(d.date()) for d in val_dates_aligned]),
             true_labels=fold_f.val_y[-n_val:], probs=ens_val_prob,
         ).save(artifact_dir / f"fold_{fold_f.fold_id:02d}_val.parquet")
         PredictionArtifact(
-            fold_id=fold_f.fold_id, split="test", model_name=MODEL_NAME,
+            fold_id=fold_f.fold_id, split="test", model_name=experiment_name,
             dates=np.array([str(d.date()) for d in fold_f.test_dates[-n:]]),
             true_labels=y_true, probs=ens_prob,
         ).save(artifact_dir / f"fold_{fold_f.fold_id:02d}_test.parquet")
 
         metrics_dict = {
             "fold_id": fold_f.fold_id,
-            "model": MODEL_NAME,
+            "model": experiment_name,
+            "fold_start": fold_start,
+            "fold_end": fold_end,
+            "run_id": run_id,
+            "ensemble_grid_search": use_grid_search,
+            "ensemble_weight_xgb": w_xgb,
+            "ensemble_weight_lag": w_lag,
             "macro_f1": result.macro_f1,
             "balanced_accuracy": result.balanced_accuracy,
             "brier_score": result.brier_score,
@@ -254,7 +265,7 @@ def main(cfg: DictConfig) -> None:
             figures_dir / f"fold_{fold_f.fold_id:02d}_timeline.png",
         )
         plot_confusion_matrix(
-            result.confusion_matrix, f"Fold {fold_f.fold_id} (ensemble)",
+            result.confusion_matrix, f"Fold {fold_f.fold_id} ({experiment_name})",
             figures_dir / f"fold_{fold_f.fold_id:02d}_cm.png",
         )
 
@@ -269,11 +280,13 @@ def main(cfg: DictConfig) -> None:
         return
 
     summary_df = pd.DataFrame(all_metrics)
-    summary_df.to_csv(output_dir / "walk_forward_summary.csv", index=False)
+    csv_path = output_dir / f"walk_forward_summary_{experiment_name}.csv"
+    summary_df.to_csv(csv_path, index=False)
+    log.info(f"Saved summary to {csv_path}")
 
     numeric_cols = ["macro_f1", "balanced_accuracy", "brier_score", "ece"]
     summary_stats = summary_df[numeric_cols].agg(["mean", "std"])
-    log.info(f"\nWalk-Forward Summary ({MODEL_NAME}):\n{summary_stats.to_string()}")
+    log.info(f"\nWalk-Forward Summary ({experiment_name}):\n{summary_stats.to_string()}")
 
     plot_fold_summary(
         all_fold_ids, summary_df["macro_f1"].tolist(),
