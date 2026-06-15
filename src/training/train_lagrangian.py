@@ -237,7 +237,8 @@ def main(cfg: DictConfig) -> None:
 
     experiment_name = getattr(cfg.model, "name", MODEL_NAME)
 
-    output_dir = Path(".")
+    output_dir = project_root / "results"
+    output_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = project_root / cfg.figures_dir / experiment_name
 
     artifact_dir = project_root / "predictions" / experiment_name

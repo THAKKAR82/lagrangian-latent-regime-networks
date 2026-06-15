@@ -320,6 +320,8 @@ def main() -> None:
         log.info(f"Saved model counts → {p}")
 
     # walk_forward_summary_*.csv files so compare_all.py picks them up automatically
+    results_dir = _PROJECT_ROOT / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
     for method, rows in fold_rows.items():
         if not rows:
             continue
@@ -327,7 +329,7 @@ def main() -> None:
         display = _METHOD_DISPLAY.get(method, method)
         wf = df[["fold_id", "macro_f1", "balanced_accuracy", "brier_score", "ece"]].copy()
         wf.insert(0, "model", display)
-        csv_path = _PROJECT_ROOT / f"walk_forward_summary_{display}.csv"
+        csv_path = results_dir / f"walk_forward_summary_{display}.csv"
         wf.to_csv(csv_path, index=False)
         log.info(f"Saved walk-forward summary → {csv_path}")
 

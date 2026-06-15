@@ -55,7 +55,8 @@ def main(cfg: DictConfig) -> None:
 
     xgb_dir = project_root / "predictions" / "xgb"
     lag_dir = project_root / "predictions" / lag_model
-    out_dir = Path(".")
+    out_dir = project_root / "results"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 

@@ -211,7 +211,8 @@ def main(cfg: DictConfig) -> None:
         tcn_dilations=list(getattr(cfg.model, 'tcn_dilations', [1, 2, 4, 8])),
     )
 
-    output_dir = Path(".")
+    output_dir = project_root / "results"
+    output_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = project_root / cfg.figures_dir / MODEL_NAME
 
     all_metrics: list[dict] = []

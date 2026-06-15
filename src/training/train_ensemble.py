@@ -154,7 +154,8 @@ def main(cfg: DictConfig) -> None:
     use_grid_search = getattr(cfg, "ensemble_grid_search", False)
     experiment_name = "ensemble_weighted_grid" if use_grid_search else "ensemble_fixed_50_50"
 
-    output_dir = Path(".")
+    output_dir = project_root / "results"
+    output_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = project_root / cfg.figures_dir / experiment_name
 
     artifact_dir = project_root / "predictions" / experiment_name

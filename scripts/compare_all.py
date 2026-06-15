@@ -8,7 +8,7 @@ Usage:
     python scripts/compare_all.py --output outputs/comparisons/bench.md
 
 Discovery:
-    Scans the project root for walk_forward_summary_*.csv files.
+    Scans results/ for walk_forward_summary_*.csv files.
     Each row must have a fold_id column. Rows are filtered by fold range if requested.
     Models with partial coverage are shown unless --require-complete-fold-range is set.
 """
@@ -20,9 +20,11 @@ from pathlib import Path
 
 import pandas as pd
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 def _load_all(root: Path) -> pd.DataFrame:
-    """Load and concatenate all walk_forward_summary_*.csv files."""
+    """Load and concatenate all walk_forward_summary_*.csv files from results/."""
     frames = []
     for csv_path in sorted(root.glob("walk_forward_summary_*.csv")):
         df = pd.read_csv(csv_path)
@@ -143,12 +145,12 @@ def main() -> None:
     parser.add_argument("--output", type=str, default=None, help="Additional markdown output path")
     args = parser.parse_args()
 
-    root = Path(".")
-    out_dir = root / "outputs" / "comparisons"
+    root = _PROJECT_ROOT / "results"
+    out_dir = _PROJECT_ROOT / "outputs" / "comparisons"
 
     all_rows = _load_all(root)
     if all_rows.empty:
-        print("No walk_forward_summary_*.csv files found in current directory.")
+        print(f"No walk_forward_summary_*.csv files found in {root}.")
         sys.exit(0)
 
     filtered = _filter_folds(all_rows, args.fold_start, args.fold_end)

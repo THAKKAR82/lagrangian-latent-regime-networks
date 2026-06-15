@@ -11,12 +11,13 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).parent.parent
+RESULTS = ROOT / "results"
 
 RUNS: dict[str, Path] = {
-    "lagrangian_v1 (8d, 4s, lr=1e-3, p=15)": ROOT / "walk_forward_summary_lagrangian_v1.csv",
-    "lagrangian_v2 (8d, 4s, lr=5e-4, p=30)": ROOT / "walk_forward_summary_lagrangian_v2.csv",
-    "lagrangian_v3 (16d, 8s, lr=5e-4, p=30)": ROOT / "walk_forward_summary_lagrangian_v3.csv",
-    "lagrangian_v4 (32d, 8s, lr=5e-4, p=30)": ROOT / "walk_forward_summary_lagrangian_v4.csv",
+    "lagrangian_v1 (8d, 4s, lr=1e-3, p=15)": RESULTS / "walk_forward_summary_lagrangian_v1.csv",
+    "lagrangian_v2 (8d, 4s, lr=5e-4, p=30)": RESULTS / "walk_forward_summary_lagrangian_v2.csv",
+    "lagrangian_v3 (16d, 8s, lr=5e-4, p=30)": RESULTS / "walk_forward_summary_lagrangian_v3.csv",
+    "lagrangian_v4 (32d, 8s, lr=5e-4, p=30)": RESULTS / "walk_forward_summary_lagrangian_v4.csv",
 }
 
 # Baselines for context

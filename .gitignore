@@ -4,7 +4,7 @@ predictions/
 outputs/
 multirun/
 
-# --- per-fold hydra outputs at root ---
+# --- per-fold hydra outputs ---
 fold_*/
 
 # --- figures: keep fold_summary.png only ---

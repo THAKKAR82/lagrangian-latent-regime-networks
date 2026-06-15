@@ -33,7 +33,7 @@ Labels are defined on SPY using rolling quantile thresholds with smoothing.
 | NODE | 0.3850 | 0.6281 | 0.1450 |
 | Lagrangian v3 (MLP) | 0.3700 | 0.6373 | 0.1258 |
 
-Per-fold CSVs are in the repo root (`walk_forward_summary_*.csv`).
+Per-fold CSVs are in `results/walk_forward_summary_*.csv`.
 
 ## Architecture
 
@@ -169,7 +169,7 @@ configs/model/        one YAML per model variant
 scripts/              compare_all.py, model_selector.py
 reports/figures/      fold_summary.png per model
 tests/test_shapes.py  147 tests
-walk_forward_summary_*.csv  per-experiment benchmark results
+results/              walk_forward_summary_*.csv — per-experiment benchmark results
 ```
 
 ## Key lessons from experiments

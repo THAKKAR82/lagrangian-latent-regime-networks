@@ -182,7 +182,8 @@ def main(cfg: DictConfig) -> None:
     fold_start = getattr(cfg, 'fold_start', None)
     fold_end = getattr(cfg, 'fold_end', None)
 
-    output_dir = Path(".")
+    output_dir = project_root / "results"
+    output_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = project_root / cfg.figures_dir / model_name
 
     all_metrics: list[dict] = []
