@@ -7,10 +7,11 @@ multirun/
 # --- per-fold hydra outputs ---
 fold_*/
 
-# --- figures: keep fold_summary.png only ---
+# --- figures: keep fold_summary.png and architecture.png only ---
 reports/figures/**/*_cm.png
 reports/figures/**/*_timeline.png
 reports/figures/*.png
+!reports/figures/architecture.png
 reports/figures/*.html
 
 # --- log files ---

@@ -37,6 +37,8 @@ Per-fold CSVs are in `results/walk_forward_summary_*.csv`.
 
 ## Architecture
 
+![LagrangianRegimeNet Architecture](reports/figures/architecture.png)
+
 ### LagrangianRegimeNet
 
 ```
